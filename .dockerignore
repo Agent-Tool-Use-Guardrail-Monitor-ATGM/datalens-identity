@@ -1,0 +1,5 @@
+# The derived image needs no source files or local credentials in its context.
+**
+!docker/
+!docker/keycloak/
+!docker/keycloak/Dockerfile

@@ -70,8 +70,8 @@ def test_rejects_unpinned_or_unapproved_images(config, image, bad_reference):
         validate_config(config)
 
 
-@pytest.mark.parametrize("name", ["identity", "Identity-Postgres", "datalens-invalid_name", 1])
-def test_service_names_require_the_shared_prefix_and_dns_safe_syntax(config, name):
+@pytest.mark.parametrize("name", ["", "Identity-Postgres", "invalid_name", 1])
+def test_service_names_require_dns_safe_syntax(config, name):
     config["services"]["keycloak"] = name
     with pytest.raises(ConfigurationError, match="Service names"):
         validate_config(config)
@@ -237,3 +237,12 @@ def test_example_defines_only_blank_expected_secret_inputs():
     )
     assert assignments.keys() == SECRET_NAMES
     assert not any(assignments.values())
+
+
+def test_logical_service_names_do_not_require_a_project_prefix(config):
+    config["services"] = {
+        "keycloak": "keycloak",
+        "postgres": "identity-postgres",
+        "mailpit": "mailpit",
+    }
+    validate_config(config)

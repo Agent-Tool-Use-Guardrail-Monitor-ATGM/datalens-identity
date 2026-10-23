@@ -2,7 +2,7 @@
 name: datalens-identity-local
 
 services:
-  datalens-identity-postgres:
+  identity-postgres:
     image: postgres:17.11-bookworm@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27
     environment:
       POSTGRES_DB: identity_db
@@ -12,7 +12,7 @@ services:
       IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?Set IDENTITY_DB_PASSWORD}
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256
     volumes:
-      - datalens-identity-postgres-data:/var/lib/postgresql/data
+      - identity-postgres-data:/var/lib/postgresql/data
       - ./docker/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test:
@@ -26,4 +26,6 @@ services:
       retries: 20
 
 volumes:
-  datalens-identity-postgres-data:
+  identity-postgres-data:
+    # Preserve existing physical storage across service renaming.
+    name: ${COMPOSE_PROJECT_NAME}_datalens-identity-postgres-data
