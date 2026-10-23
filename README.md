@@ -1,30 +1,27 @@
 # DataLens identity
 
-Renamed from the original identity folder to `services/datalens-identity/` on
-23 October 2026. The service-local environment and command launchers were repaired
-at the new path. All owned service names now begin with `datalens-`; the
-`[services]` section of the TOML contract enforces unique DNS-safe names.
+Keycloak configuration repository at `services/datalens-identity/`, remote
+[DataLens identity](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity).
+Python is configuration/test tooling; there is no custom authentication API.
 
-Separate Keycloak configuration repository, intended GitHub name
-`datalens-identity`, with source kept at `services/datalens-identity/` in the DataLens
-workspace. Keycloak is the identity runtime; Python here is configuration/test
-tooling only. There is no custom authentication API or password database code.
+## Current progress
 
-## Current scope — step 2.1
+Step 2.1 is present on main at `e4a5a1e`; its required `tests` check succeeded.
+The active rules require PRs, passing `tests`, up-to-date branches, and block
+force pushes/deletions. The repository was initialized with its foundation;
+no earlier merged feature PR was listed. All subsequent work uses the PR gate.
 
-The foundation defines pinned image references, local/test isolation and required
-secret names in [config/identity.toml](config/identity.toml). Its checker rejects
-unknown fields, cross-service/shared database targets, persistent test storage,
-noncanonical/non-loopback origins, overlapping/invalid ports and unpinned images.
+**Step 2.2 is locally complete on `feature/postgres-foundation`, pending
+commit/PR/CI delivery.** Local identity PostgreSQL is running and healthy.
+All **83 tests pass without skips**, including 11 real-database cases and two
+credential-file cases; Ruff and dependency checks pass. Disposable test resources
+were removed; the separate persistent local database remains running. Step 2.3
+has not started: no Keycloak runtime, realm, account, role assignment or invitation
+has been created.
 
-This is a desired configuration contract, not Compose or a configured realm.
-No container, PostgreSQL database, Keycloak account/realm, invitation, OAuth client
-or cloud resource is created in 2.1. Database services start in 2.2; Keycloak starts
-in 2.3. Later steps add native login, admin/user roles and email activation.
+## Tooling and configuration
 
-## Python environment and checks
-
-Use Python 3.12 with a separate standard `.venv` in this repository. From its root:
+Use Python 3.12 and this repository's own standard `.venv`. From the repository:
 
 ```powershell
 py -3.12 -m venv .venv
@@ -32,142 +29,133 @@ py -3.12 -m venv .venv
 python -m pip install -r requirements.txt
 python -m pip check
 python tools/check_config.py
-python -m pytest -q
-python -m ruff check .
-python -m ruff format --check tools tests
 ```
 
-If activation is unavailable, use `.\.venv\Scripts\python.exe` for `python`.
-On the current workstation, the ignored standalone Python runtime is at
-`../../.tools/python312/python/python.exe`; it created this service's environment
-with `-m venv .venv`. Keep the base runtime while the environment uses it. The
-agent's environment is independent and was not changed. No Conda or uv is used.
+Activation is optional: use `.\.venv\Scripts\python.exe` instead of `python`.
+On this workstation the base is the ignored standalone CPython 3.12.15 runtime
+at `../../.tools/python312/python/python.exe`; keep it while the environment uses
+it. No Conda, uv or installable Python identity application is introduced.
 
-`requirements.txt` is the only dependency list. `pyproject.toml` configures tests
-and Ruff; this repository is not an installable application package. The checker
-uses Python's standard TOML parser and can also run before dependencies are
-installed. Importing it does not read configuration or contact infrastructure.
+`requirements.txt` is the only tooling dependency list. `pyproject.toml` configures
+pytest/Ruff. [config/identity.toml](config/identity.toml) declares prefixed service
+names, pinned images, local/test boundaries and future issuer/callback settings.
+The checker rejects unknown/missing fields, unpinned images, noncanonical origins,
+port collisions, shared storage targets and invalid secret references. Importing
+it does no I/O; its CLI reads only an explicit/default contract, never dotenv.
+The optional `--check-secrets` checks all declared process secrets, including the
+future Keycloak administrator secret; it is not needed to start only PostgreSQL.
 
-Playwright 1.64.1 pins its browser revisions. For later real login tests, install
-only Chromium with `python -m playwright install chromium`; Linux CI will use
-`python -m playwright install --with-deps chromium` when those tests are added.
-The initial configuration-only CI job does not need a browser or Docker. Browser
-installation must remain aligned with the requirements version; do not reuse an
-arbitrary system Chrome binary as the test browser.
+Playwright 1.64.1 pins Chromium revision 1248 for later browser tests. When needed,
+use `python -m playwright install chromium` (Linux CI: add `--with-deps`). Browser
+installation/login are not part of 2.2. The test gate currently needs Docker,
+Python and the PostgreSQL image, without Azure, Keycloak, mail or LLM credentials.
 
-Resolution check on 23 October 2026: Playwright selected Chromium
-156.0.8078.4/revision 1248 (including its headless shell), FFmpeg revision 1013
-and Winldd revision 1007 for Windows. Only the installation dry run was needed
-for 2.1; no browser was downloaded or launched, and no login is claimed tested.
+## Start the local identity database
 
-## Configuration and secrets
-
-`python tools/check_config.py` validates the committed structural contract. Its
-default path is relative to the script, not the terminal's working directory.
-`--config <path>` selects an explicit alternative. It returns 0 for valid input
-and 1 for configuration failure; diagnostics do not print supplied values,
-connection strings, secrets or parser tracebacks.
-
-`.env.example` declares three blank secret inputs: PostgreSQL bootstrap,
-Keycloak database login and temporary Keycloak administrator passwords. Put real
-values only in ignored local configuration or deployment secret injection. No
-local secrets were generated, and the checker never loads dotenv automatically.
-With those variables explicitly supplied in the process environment, use:
+Docker Desktop's Linux engine must be running. Local credentials already exist
+on this workstation in ignored `.env.postgres`; do not print or commit the file.
+For a fresh checkout, create independent random bootstrap/application passwords:
 
 ```powershell
-python tools/check_config.py --check-secrets
+python tools/init_local_database.py
+docker compose --env-file .env.postgres up -d --wait --wait-timeout 90
+docker compose --env-file .env.postgres ps
 ```
 
-The additional check requires distinct values of at least 16 non-padding
-characters and rejects common placeholder prefixes. It does not prove password
-strength or database/account connectivity. CI uses synthetic values in tests;
-it needs no repository secrets. OIDC client and real-SMTP secrets will be added
-with their owning implementation steps. Do not commit user/realm exports,
-captured mail, invitation URLs, browser traces or token material.
+The generator refuses to overwrite an existing file. Alternatively, fill the two
+blank entries in [.env.postgres.example](.env.postgres.example) in an ignored
+`.env.postgres`; keep distinct strong values. No Keycloak secret is generated.
+Container initialization variables are not a password-rotation mechanism.
 
-## Intended container boundaries
+[compose.yaml](compose.yaml) starts only `datalens-identity-postgres`, scoped to
+project/network `datalens-identity-local`. Its PostgreSQL 17 data uses named volume
+`datalens-identity-local_datalens-identity-postgres-data`. There is **no published
+host port**. A future Keycloak container on that network connects to
+`datalens-identity-postgres:5432`, database `identity_db`, login `identity_app`.
+It uses the application password, never bootstrap credentials. No service uses
+agent database credentials, network attachments or storage mounts.
 
-| Contract | Development | Disposable tests |
-|---|---|---|
-| Compose project | `datalens-identity-local` | `datalens-identity-tests` |
-| Realm | `datalens` | `datalens-test` |
-| Database / runtime role | `identity_db` / `identity_app` | `identity_test_db` / `identity_test` |
-| Storage | Own named PostgreSQL volume | Own tmpfs database; never development mounts |
-| Public identity origin | `http://localhost:8081` | `http://localhost:18081` |
-| Management host port | Loopback 9001 | Loopback 19001 |
-| Mailpit UI/API host port | Loopback 8025 | Loopback 18025 |
-| Future callback origin | `http://localhost:8000` | `http://localhost:18089` |
+The bootstrap PostgreSQL login `identity_bootstrap` creates the database and
+restricted `identity_app` login on fresh storage. The application owns its
+identity database/schema and may perform the DDL needed by Keycloak. It has no
+superuser, create-database, create-role, replication or bypass-RLS privileges and
+no role memberships. PUBLIC database grants are removed; the application cannot
+connect to the separate postgres/template1 databases. These are PostgreSQL roles,
+not the future Keycloak application user/admin roles.
 
-Later Compose files create independent networks per project. Keycloak reaches
-its own `datalens-identity-postgres:5432` and `datalens-identity-mailpit:1025` on its network;
-PostgreSQL/SMTP need no host port. Management maps internal 9000 only to loopback.
-Browser-visible issuer origins remain canonical localhost addresses; an internal
-Docker hostname must not replace the token issuer. Production HTTPS/DNS and
-container access to the public issuer are later integration/deployment checks.
+The [initialization script](docker/postgres/10-create-identity-role.sh) permits
+only the local/test identity targets. It uses psql variable quoting/getenv for
+passwords and fixed failure diagnostics. Git enforces LF endings for shell
+scripts. The readiness probe authenticates the application login over TCP and
+runs SELECT 1, so an available listener alone is insufficient. Host authentication
+uses SCRAM; Linux/container TLS, production secret delivery and backup operations
+remain deployment work. Docker administrators can access container environment.
 
-The agent database, volume and credentials are never identity inputs. Keycloak
-will manage only its identity schema. Database initialization, least-privilege
-roles, health checks and persistent restart behavior belong to 2.2/2.3.
+A read-only smoke check confirmed `identity_db`/`identity_app`, no cluster-level
+creation privileges and an empty public application schema. No mock business or
+Keycloak tables were added to the local database.
 
-## Verified image baselines
+## Restart, stop and credential changes
 
-Manifest-index SHA-256 digests were resolved from the official registries on
-23 October 2026 and are recorded with exact tags in the TOML contract:
+```powershell
+docker compose --env-file .env.postgres restart
+docker compose --env-file .env.postgres up -d --wait --wait-timeout 90
+# To stop the development database while keeping its data:
+docker compose --env-file .env.postgres down
+```
 
-- Keycloak **26.8.1**, the current official stable release at verification.
-- PostgreSQL **17.11-bookworm**; PostgreSQL 17.x is in Keycloak's supported range.
-- Mailpit **v1.32.0**, for future development/test email capture only.
+Never add `--volumes`/`-v` to development cleanup. Changing image/container does
+not require recreating the data volume. Initial scripts run only on empty
+storage; later role/password changes need explicit supported administration and
+matching client-secret updates. Do not delete a volume or assume editing dotenv
+changes existing database credentials. Incomplete first-time initialization must
+be diagnosed before retry; an existing data directory is not silently repaired.
 
-The tags and manifest references were checked without pulling/running the images.
-Recent public Keycloak advisories were reviewed alongside the stable release;
-this is not a full container vulnerability scan or production security sign-off.
-Recheck advisories and digest choices before runtime/cloud deployment. Do not
-enable unneeded SAML, LDAP or dynamic client-registration features.
+## Run the database tests
 
-Sources: [Keycloak downloads](https://www.keycloak.org/downloads),
-[supported databases](https://www.keycloak.org/server/supported-configurations),
-[public advisories](https://github.com/keycloak/keycloak/security/advisories),
-[Mailpit releases](https://github.com/axllent/mailpit/releases),
-[Playwright releases](https://github.com/microsoft/playwright-python/releases).
+[compose.test.yaml](compose.test.yaml) uses project `datalens-identity-tests`,
+`identity_test_db`, runtime login `identity_test`, fixed synthetic passwords and
+tmpfs. It publishes no ports and never mounts development data. From this repo:
 
-## GitHub delivery and test gate
+```powershell
+docker compose -p datalens-identity-tests -f compose.test.yaml up -d --wait --wait-timeout 90
+$env:IDENTITY_DATABASE_TESTS = '1'
+python -m pytest -q
+Remove-Item Env:IDENTITY_DATABASE_TESTS
+docker compose -p datalens-identity-tests -f compose.test.yaml down
+python -m ruff check .
+python -m ruff format --check tools tests
+python -m pip check
+```
 
-Every change uses a task branch and PR to `main`; never commit or push
-implementation directly to main. Current local branch:
-`feature/identity-foundation`. No implementation commit or push has been made.
+Always remove the disposable fixture afterward, including when tests fail.
+Missing opt-in skips marked database tests locally; CI must enable it and cannot
+count skips as passes. Existing configuration tests still need no infrastructure.
 
-The user confirmed that the remote has not been created yet. Create
-`datalens-identity` in the team organization, initializing it with only a README
-on main, then provide its URL. The local feature branch currently has no commits;
-connect the initialized main as its base while preserving these files **before**
-committing. Do not create an unrelated root implementation commit or discard local
-files to resolve the initial README overlap. No remote URL is configured yet.
+Tests verify rendered configuration against the contract; real application
+ownership, DDL and CRUD; denied database/role creation, role escalation and access
+to other databases; rejected wrong passwords; and failure on missing bootstrap
+configuration before any container is created. The persistence case uses the
+actual development Compose file with a synthetic test override under a third
+project, `datalens-identity-persistence-tests`. It creates a disposable named
+volume, verifies a sentinel survives restart, and removes only that verified
+project's volume. It never writes a sentinel into local identity_db.
 
-The tests-only [.github/workflows/ci.yml](.github/workflows/ci.yml) runs job
-**`tests`** on all PRs to main and main pushes, using Python 3.12/Ubuntu 24.04,
-read-only permissions and a ten-minute limit. It installs tooling and runs the
-real configuration tests; no infrastructure/secrets or browser download is needed.
-Later steps extend this same gate with disposable services and login tests.
+The same required **`tests`** job now starts disposable PostgreSQL before pytest
+and removes it with `if: always()`. Local results do not establish the new branch's
+GitHub result; its PR still needs required checks on the latest revision.
 
-After the first PR runs, configure main's rules to require PRs and the **`tests`**
-status check, require an up-to-date branch, and restrict bypass/direct pushes.
-Merge only after required checks pass for the latest revision. Local verification
-does not prove GitHub CI execution or branch protection. Repository creation,
-initial main attachment, first PR and required-check configuration remain delivery
-items until verified. Parent workspace plans are not included in this repository.
+## Workflow and boundary
 
-## Local verification — 23 October 2026
+Branch names use `<type>/<short-kebab-case-description>` and describe the task independently of the repository name. Do not automatically add a `datalens` or repository-name prefix. For example: `feature/postgres-foundation`, `fix/readiness-timeout`, `ci/run-tests`.
 
-Created a fresh service-local environment with Python 3.12.15 and installed the
-four pinned tooling dependencies. After the folder/name update, **70 tests pass
-without skips**, including prefix/syntax/uniqueness checks. Ruff lint
-and formatting passed, and `pip check` reported no broken requirements.
-The structural CLI passed without secrets or infrastructure. Explicit
-secret-check failures and success were verified using synthetic inputs, without
-logging their values. Image manifest references were resolved from registries;
-the Playwright browser revision was resolved through its dry run.
+Every change uses a task branch and PR to main, with required tests passing and
+an up-to-date branch. Never commit or push implementation directly to main. The
+current feature branch is `feature/postgres-foundation`; nothing was staged,
+committed, pushed or merged during this step. After its PR passes and merges,
+request **2.3 — Keycloak runtime, database connection and readiness** separately.
+Parent workspace plans/index are outside this repository and its PR.
 
-No Compose service, database, identity server, real account, mail delivery or
-browser-login behavior was tested at this stage. The repository remains on the
-uncommitted `feature/identity-foundation` branch with no main implementation
-commit. Finish remote/base/PR/required-CI setup before 2.2.
+Sources: [official PostgreSQL image initialization](https://github.com/docker-library/docs/blob/master/postgres/README.md),
+[PostgreSQL role attributes](https://www.postgresql.org/docs/17/role-attributes.html),
+[psql variables/getenv](https://www.postgresql.org/docs/17/app-psql.html).

@@ -13,6 +13,8 @@ jobs:
   tests:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      IDENTITY_DATABASE_TESTS: "1"
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -24,5 +26,10 @@ jobs:
           python-version: "3.12"
       - name: Install test tooling
         run: python -m pip install -r requirements.txt
+      - name: Start disposable identity database
+        run: docker compose -p datalens-identity-tests -f compose.test.yaml up -d --wait --wait-timeout 90
       - name: Run tests
         run: python -m pytest -q
+      - name: Remove disposable database
+        if: always()
+        run: docker compose -p datalens-identity-tests -f compose.test.yaml down
