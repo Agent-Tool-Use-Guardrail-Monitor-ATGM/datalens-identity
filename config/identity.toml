@@ -1,0 +1,41 @@
+# Desired local/test contract, not yet a running Compose or Keycloak realm config.
+schema_version = 1
+
+[services]
+keycloak = "datalens-identity"
+postgres = "datalens-identity-postgres"
+mailpit = "datalens-identity-mailpit"
+
+[images]
+keycloak = "quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b"
+postgres = "postgres:17.11-bookworm@sha256:858bb5e98eed02eb8cafbcdc007f9a65d1b613972028944a8ec2133ccaf80d27"
+mailpit = "axllent/mailpit:v1.32.0@sha256:0790692be935ea4420d085694f7985b1f692ca6a8771ab0e0bd8ba75ac180498"
+
+[secrets]
+required_env = [
+  "IDENTITY_DB_BOOTSTRAP_PASSWORD",
+  "IDENTITY_DB_PASSWORD",
+  "KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD",
+]
+
+[profiles.local]
+project = "datalens-identity-local"
+realm = "datalens"
+database = "identity_db"
+database_user = "identity_app"
+public_origin = "http://localhost:8081"
+management_port = 9001
+mailpit_port = 8025
+callback_origin = "http://localhost:8000"
+storage = "named-volume"
+
+[profiles.test]
+project = "datalens-identity-tests"
+realm = "datalens-test"
+database = "identity_test_db"
+database_user = "identity_test"
+public_origin = "http://localhost:18081"
+management_port = 19001
+mailpit_port = 18025
+callback_origin = "http://localhost:18089"
+storage = "tmpfs"

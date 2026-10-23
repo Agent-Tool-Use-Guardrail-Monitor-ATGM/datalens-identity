@@ -1,0 +1,25 @@
+# Service-local Python test tooling.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Local secrets and captured identity data.
+.env
+.env.*
+!.env.example
+secrets/
+exports/
+mail-data/
+test-results/
+playwright-report/
+*.log
+.DS_Store
+Thumbs.db
