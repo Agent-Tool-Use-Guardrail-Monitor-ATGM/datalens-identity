@@ -2,6 +2,7 @@
 testpaths = ["tests"]
 pythonpath = ["tools"]
 addopts = "-ra --strict-config --strict-markers"
+markers = ["postgres: requires the explicitly enabled disposable identity database fixture"]
 
 [tool.ruff]
 target-version = "py312"

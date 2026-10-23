@@ -166,9 +166,9 @@ def read_config(path: Path = DEFAULT_CONFIG) -> dict:
     return validate_config(config)
 
 
-def check_secrets(environment: Mapping[str, str]) -> None:
+def check_secrets(environment: Mapping[str, str], *, names: frozenset[str] = SECRET_NAMES) -> None:
     values = []
-    for name in sorted(SECRET_NAMES):
+    for name in sorted(names):
         value = environment.get(name, "")
         require(
             isinstance(value, str)
