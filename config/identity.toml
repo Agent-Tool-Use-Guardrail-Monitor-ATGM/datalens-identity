@@ -2,9 +2,9 @@
 schema_version = 1
 
 [services]
-keycloak = "keycloak"
+keycloak = "identity-keycloak"
 postgres = "identity-postgres"
-mailpit = "mailpit"
+mailpit = "identity-mailpit"
 
 [images]
 keycloak = "quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b"

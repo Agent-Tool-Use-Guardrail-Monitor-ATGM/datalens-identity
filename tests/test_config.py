@@ -241,8 +241,8 @@ def test_example_defines_only_blank_expected_secret_inputs():
 
 def test_logical_service_names_do_not_require_a_project_prefix(config):
     config["services"] = {
-        "keycloak": "keycloak",
+        "keycloak": "identity-keycloak",
         "postgres": "identity-postgres",
-        "mailpit": "mailpit",
+        "mailpit": "identity-mailpit",
     }
     validate_config(config)

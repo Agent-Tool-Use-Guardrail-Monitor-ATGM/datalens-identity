@@ -12,8 +12,10 @@ force pushes/deletions. The repository was initialized with its foundation;
 no earlier merged feature PR was listed. All subsequent work uses the PR gate.
 
 Step 2.2 was delivered through PR #1, merged at `9f6d675`, with required
-`tests` successful. Step 2.3 is locally verified on `feature/keycloak-runtime`: **87 tests pass
-without skips**, with Ruff and dependency checks passing. PR/required CI remain pending.
+`tests` successful. Step 2.3 was delivered through PR #2 (`50af5f5`); required tests passed on the PR.
+Step 2.4 is locally verified on `feature/admin-realm-bootstrap`; its focused
+acceptance test passed in 50.81 seconds. Full previous suites were not rerun.
+Local account onboarding and new PR/CI delivery remain pending.
 Steps 2.4вЂ“2.8 remain unimplemented.
 
 ## Tooling and configuration
@@ -148,7 +150,7 @@ Branch names use `<type>/<short-kebab-case-description>` and describe the task i
 
 Every change uses a task branch and PR to main, with required tests passing and
 an up-to-date branch. Never commit or push implementation directly to main. The
-current feature branch is `feature/keycloak-runtime`; nothing was staged,
+current feature branch is `feature/admin-realm-bootstrap`; nothing was staged,
 committed, pushed or merged during this step. After its PR passes and merges,
 request **2.3 РІР‚вЂќ Keycloak runtime, database connection and readiness** separately.
 Parent workspace plans/index are outside this repository and its PR.
@@ -186,7 +188,7 @@ administrator prompt is expected; complete account bootstrap only in step 2.4.
 To restart without deleting data:
 
 ```powershell
-docker compose --env-file .env.postgres -f compose.yaml -f compose.runtime.yaml restart keycloak
+docker compose --env-file .env.postgres -f compose.yaml -f compose.runtime.yaml restart identity-keycloak
 docker compose --env-file .env.postgres -f compose.yaml -f compose.runtime.yaml up -d --wait --wait-timeout 180
 ```
 
@@ -222,3 +224,97 @@ renamed runtime startup, restart, wrong-password and outage checks. Agent passes
 all **154 tests without skips**. Ruff and diff whitespace checks pass. Disposable
 test stacks were removed; persistent containers/data remain unchanged. Parent
 plans remain outside service pull requests.
+
+
+## Administrator and realm setup — step 2.4
+
+Internal services are `identity-keycloak`, `identity-postgres` and
+`identity-mailpit`. Repository names and upstream image/configuration keys retain
+their existing names. The naming-only change did not trigger a full-suite rerun.
+
+This step supplies an explicit one-time local setup tool, not another identity
+API. After the new branch passes its PR/CI gate, run from this repository:
+
+```powershell
+.\.venv\Scripts\python.exe tools/bootstrap_identity.py --admin maxim-admin
+```
+
+Choose your own administrator name; `maxim-admin` is an example. The tool prompts
+twice for a password of at least 16 characters. It never prints or saves that
+password, a temporary password or tokens. It stops the single local identity
+node, ensures PostgreSQL readiness, invokes Keycloak's supported offline
+`bootstrap-admin user --optimized` with a randomly generated environment secret,
+starts the runtime, creates the named master-realm administrator, verifies its
+access, creates the application realm, and deletes the temporary administrator.
+Bootstrap secrets are absent from normal runtime configuration. Admin API access
+uses Keycloak's built-in master-realm admin-cli for this local administration
+operation; this does not enable a password grant for the future application client.
+
+If old containers still use previous service names, the tool refuses offline
+bootstrap until they are stopped. Inspect this project's containers first:
+
+```powershell
+docker ps --filter label=com.docker.compose.project=datalens-identity-local
+```
+
+Stop only the displayed legacy identity runtime/database containers before
+recreating the renamed services. Do not delete volumes. The explicit database
+volume name preserves the existing identity data. Do not run this local tool
+against a multi-node deployment or a database served by another Keycloak node.
+
+Open http://localhost:8081/admin/ and choose the **master** realm to sign in with
+the named platform administrator. This administrator can manage identity; future
+application `admin` users do not automatically receive those permissions.
+
+The new `datalens` realm disables public registration, requires verified email,
+enables brute-force protection and a password policy (12 characters plus upper,
+lower, digit and special character), and configures 5-minute access tokens,
+30-minute idle sessions, 8-hour maximum sessions and 24-hour admin action links.
+SMTP/activation and application roles/client remain future steps 2.5/2.6.
+[config/realm.json](config/realm.json) contains only desired non-secret settings.
+It is submitted through the Admin API, not imported on startup. Existing realms
+are checked against these settings; mismatches require manual review. Existing
+users/passwords are not overwritten. Ordinary startup never recreates accounts.
+
+The tool is a one-time onboarding operation. If the named administrator already
+exists, it refuses to reset that account. If setup partially fails, use the
+console with an existing working administrator to inspect state. Do not blindly
+rerun setup or delete the database. A failed handoff can leave temporary access;
+remove it after verifying permanent access.
+
+Recovery: stop **all** identity nodes, ensure the database remains available, and
+use the same image/database configuration with Keycloak's supported command:
+
+```powershell
+# Set a fresh recovery secret in this terminal's environment without committing it.
+# Choose a distinct temporary recovery username; never reuse a permanent username.
+docker compose --env-file .env.postgres -f compose.yaml -f compose.runtime.yaml run --rm --no-deps -e KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD identity-keycloak bootstrap-admin user --optimized --username recovery-admin --password:env KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD --no-prompt
+docker compose --env-file .env.postgres -f compose.yaml -f compose.runtime.yaml up -d --wait --wait-timeout 180
+```
+
+Obtain/set that secret through a protected local channel; do not paste passwords
+into command arguments, chat or committed files. After recovery, verify a working
+permanent administrator, remove the recovery administrator and clear the terminal
+environment secret. Startup bootstrap variables cannot reset an existing master
+administrator. No recovery secret belongs in the normal Compose environment.
+
+Focused acceptance uses only disposable synthetic accounts:
+
+```powershell
+docker compose -p datalens-identity-tests -f compose.test.yaml -f compose.runtime.test.yaml up -d --build --wait --wait-timeout 180
+$env:IDENTITY_RUNTIME_TESTS = "1"
+.\.venv\Scripts\python.exe -m pytest -q tests/test_admin_bootstrap.py
+docker compose -p datalens-identity-tests -f compose.test.yaml -f compose.runtime.test.yaml down
+```
+
+Run this acceptance case on fresh disposable storage, and always clean up after
+failure. It is not a command to rerun against your real accounts. The existing
+required `tests` CI job automatically collects the new acceptance test as well.
+Sources: [offline bootstrap/recovery](https://www.keycloak.org/server/bootstrap-admin-recovery),
+[administration](https://www.keycloak.org/docs/latest/server_admin/).
+
+Focused verification: offline recovery, named-administrator access, temporary
+account removal, realm defaults, repeated realm initialization, restart retention
+and denied administration for an unrelated application-like role all passed.
+Ruff/diff checks pass for the new files. Local real accounts were not created;
+the operator must run the protected prompt-based setup command above.
