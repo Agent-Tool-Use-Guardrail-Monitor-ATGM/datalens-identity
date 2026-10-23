@@ -1,6 +1,6 @@
 # Add to the matching database Compose file; PostgreSQL storage remains unchanged.
 services:
-  keycloak:
+  identity-keycloak:
     build:
       context: .
       dockerfile: docker/keycloak/Dockerfile

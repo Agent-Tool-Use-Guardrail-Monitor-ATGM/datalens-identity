@@ -11,7 +11,7 @@ from check_config import read_config
 from test_database import FixtureDatabase
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICE = "keycloak"
+SERVICE = "identity-keycloak"
 MANAGEMENT = "http://localhost:19001"
 
 
