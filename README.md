@@ -380,3 +380,97 @@ rerun; required CI installs Chromium and runs all identity tests on the PR.
 No local live users or clients were changed; operator application of the new
 configuration remains explicit. No commit/push/PR was created. Stop before 2.6.
 Parent plans are local workspace documents outside service repositories/PRs.
+
+
+## Email capture and activation — step 2.6
+
+Implemented on `feature/email-activation`, based on merged OIDC PR #4 (`57deb26`)
+with successful required tests. Both runtime Compose files now include the pinned
+`identity-mailpit` image. Its SMTP port 1025 is internal only; capture UI/API binds
+to loopback at http://localhost:8025 (tests: http://localhost:18025). Capture storage
+is ephemeral, with a 100-message limit. Mailpit does not deliver to real inboxes.
+
+Start the existing complete local stack, then configure capture explicitly:
+
+```powershell
+docker compose --env-file .env.postgres -f compose.yaml -f compose.runtime.yaml up -d --build --wait --wait-timeout 180
+.\.venv\Scripts\python.exe tools/configure_email.py --admin maxim-admin
+```
+
+Use your actual platform administrator name; the password is prompted. This sets
+only local realm SMTP capture. It does not create users or send invitations.
+No bootstrap secret enters normal runtime startup. All previous realm, role and
+OIDC configuration remains owned by its existing setup steps.
+
+To invite a teammate:
+
+1. Sign in to the Keycloak console as a platform administrator; select `datalens`.
+2. Create an enabled account with username, email, first/last name. Public signup
+   stays disabled. Assign the intended `agent-api` client role, `user` or `admin`.
+3. Require **Verify Email** and **Update Password**, then send an execute-actions
+   email from that user's console page. The realm's admin-action lifetime is
+   24 hours. Do not set/email a shared password or send tokens to the user.
+4. Open the captured invitation in Mailpit; follow it to Keycloak and complete
+   password setup. Check that required actions are cleared and email is verified.
+5. The account can now complete the configured OIDC flow. Agent-side sessions and
+   access enforcement still belong to plan 3; the callback is not implemented yet.
+
+Pending activation is represented by required actions on an enabled account.
+Disabling an account is an administrative denial, not an invitation state. Resend
+an invitation when needed; do not assume resending invalidates every earlier link.
+Never commit captured emails, invitation URLs, passwords or tokens. No browser
+screenshots/traces or mail bodies are saved by the acceptance test.
+
+For real delivery, configure the realm's SMTP settings with your selected
+provider: verified sender/address/domain, SMTP host and port, required TLS mode,
+authentication username and secret. Select STARTTLS or implicit TLS according to
+that provider; never carry the local auth=false/TLS=false settings into a shared
+production environment. Store/deploy secrets through the protected runtime/console
+channel, never committed realm exports. Restrict console access and protect the
+identity database/backups containing configuration. Verify actual inbox delivery,
+spam handling and expiry before inviting real users. Provider/domain setup,
+sending limits and real-inbox delivery remain unverified; no provider or paid
+resource is provisioned by this step.
+
+Focused synthetic acceptance:
+
+```powershell
+$env:IDENTITY_RUNTIME_TESTS = "1"
+.\.venv\Scripts\python.exe -m pytest -q tests/test_email_activation.py
+```
+
+Start both test Compose files first, install the pinned Chromium browser as in CI,
+and always remove the disposable test stack afterward. Never run this test
+against local identity data. It captures synthetic invitations, completes browser
+actions, then verifies OIDC/introspection email claims. Failure/expiry/reuse/resend
+checks use only synthetic identities. Real live accounts were not modified.
+Sources: [Mailpit API](https://mailpit.axllent.org/docs/api-v1/),
+[Keycloak Admin API](https://www.keycloak.org/docs-api/latest/rest-api/index.html),
+[account required actions](https://www.keycloak.org/docs/latest/server_admin/).
+
+
+Step 2.6 evidence — 23 October 2026: implemented on `feature/email-activation`,
+based on PR #4 (`57deb26`, required tests passed). Added pinned local/test Mailpit
+with internal SMTP and loopback-only UI/API, ephemeral capture and a 100-message
+limit; added explicit prompt-based local SMTP setup. Admin-created enabled users
+receive VERIFY_EMAIL/UPDATE_PASSWORD action emails via the existing console.
+No account-management API, automatic live invitations or real SMTP was added.
+
+The new focused acceptance passed in **69.22 seconds** against real Keycloak,
+Mailpit and Chromium. Synthetic tests cover invitation capture, expired links,
+resend/new invitations, browser password setup, cleared required actions,
+verified-email claims in access token/introspection, consumed-link reuse denial,
+and SMTP failure without verification. Before activation the synthetic account
+has required actions and no credential, so cannot complete password login.
+Resend creates another invitation; no guarantee about invalidating earlier links
+is inferred. No captured mail body, action URL or token was saved as an artifact.
+Ruff/format/diff checks pass. Existing full suites were not rerun; the existing
+required CI job collects the new acceptance test. Disposable test resources were
+removed; live identity accounts/configuration/storage remain unchanged.
+
+Local operator setup and console invitation steps are documented in the identity
+README. Real SMTP requires provider-specific host/port/TLS/authentication,
+verified sender/domain and secret injection; actual inbox delivery remains
+unverified. No paid infrastructure or external messaging was used. Nothing was
+staged, committed, pushed or merged. Parent plans remain outside service PRs.
+Deliver this step through PR/required CI before requesting 2.7.
