@@ -13,7 +13,7 @@ from init_local_database import DATABASE_SECRET_NAMES
 ROOT = Path(__file__).resolve().parents[1]
 PROJECT = "datalens-identity-tests"
 PERSISTENCE_PROJECT = "datalens-identity-persistence-tests"
-SERVICE = "datalens-identity-postgres"
+SERVICE = "identity-postgres"
 
 
 class FixtureDatabase:

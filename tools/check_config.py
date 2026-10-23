@@ -89,11 +89,11 @@ def validate_config(config: object) -> dict:
     require(
         all(
             isinstance(name, str)
-            and re.fullmatch(r"datalens-[a-z0-9]+(?:-[a-z0-9]+)*", name) is not None
+            and re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name) is not None
             for name in service_names
         )
         and len(set(service_names)) == len(service_names),
-        "Service names must be unique and start with datalens-.",
+        "Service names must be unique and use lowercase DNS-safe logical names.",
     )
     fields(config["images"], set(IMAGE_PATTERNS), "images")
     for name, pattern in IMAGE_PATTERNS.items():

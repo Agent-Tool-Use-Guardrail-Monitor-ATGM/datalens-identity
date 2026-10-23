@@ -11,13 +11,10 @@ The active rules require PRs, passing `tests`, up-to-date branches, and block
 force pushes/deletions. The repository was initialized with its foundation;
 no earlier merged feature PR was listed. All subsequent work uses the PR gate.
 
-**Step 2.2 is locally complete on `feature/postgres-foundation`, pending
-commit/PR/CI delivery.** Local identity PostgreSQL is running and healthy.
-All **83 tests pass without skips**, including 11 real-database cases and two
-credential-file cases; Ruff and dependency checks pass. Disposable test resources
-were removed; the separate persistent local database remains running. Step 2.3
-has not started: no Keycloak runtime, realm, account, role assignment or invitation
-has been created.
+Step 2.2 was delivered through PR #1, merged at `9f6d675`, with required
+`tests` successful. Step 2.3 is locally verified on `feature/keycloak-runtime`: **87 tests pass
+without skips**, with Ruff and dependency checks passing. PR/required CI remain pending.
+Steps 2.4вЂ“2.8 remain unimplemented.
 
 ## Tooling and configuration
 
@@ -37,7 +34,7 @@ at `../../.tools/python312/python/python.exe`; keep it while the environment use
 it. No Conda, uv or installable Python identity application is introduced.
 
 `requirements.txt` is the only tooling dependency list. `pyproject.toml` configures
-pytest/Ruff. [config/identity.toml](config/identity.toml) declares prefixed service
+pytest/Ruff. [config/identity.toml](config/identity.toml) declares logical service
 names, pinned images, local/test boundaries and future issuer/callback settings.
 The checker rejects unknown/missing fields, unpinned images, noncanonical origins,
 port collisions, shared storage targets and invalid secret references. Importing
@@ -67,11 +64,11 @@ blank entries in [.env.postgres.example](.env.postgres.example) in an ignored
 `.env.postgres`; keep distinct strong values. No Keycloak secret is generated.
 Container initialization variables are not a password-rotation mechanism.
 
-[compose.yaml](compose.yaml) starts only `datalens-identity-postgres`, scoped to
+[compose.yaml](compose.yaml) starts only `identity-postgres`, scoped to
 project/network `datalens-identity-local`. Its PostgreSQL 17 data uses named volume
-`datalens-identity-local_datalens-identity-postgres-data`. There is **no published
+`datalens-identity-local_identity-postgres-data`. There is **no published
 host port**. A future Keycloak container on that network connects to
-`datalens-identity-postgres:5432`, database `identity_db`, login `identity_app`.
+`identity-postgres:5432`, database `identity_db`, login `identity_app`.
 It uses the application password, never bootstrap credentials. No service uses
 agent database credentials, network attachments or storage mounts.
 
@@ -151,11 +148,77 @@ Branch names use `<type>/<short-kebab-case-description>` and describe the task i
 
 Every change uses a task branch and PR to main, with required tests passing and
 an up-to-date branch. Never commit or push implementation directly to main. The
-current feature branch is `feature/postgres-foundation`; nothing was staged,
+current feature branch is `feature/keycloak-runtime`; nothing was staged,
 committed, pushed or merged during this step. After its PR passes and merges,
-request **2.3 — Keycloak runtime, database connection and readiness** separately.
+request **2.3 РІР‚вЂќ Keycloak runtime, database connection and readiness** separately.
 Parent workspace plans/index are outside this repository and its PR.
 
 Sources: [official PostgreSQL image initialization](https://github.com/docker-library/docs/blob/master/postgres/README.md),
 [PostgreSQL role attributes](https://www.postgresql.org/docs/17/role-attributes.html),
 [psql variables/getenv](https://www.postgresql.org/docs/17/app-psql.html).
+
+
+## Keycloak runtime вЂ” step 2.3
+
+The runtime overlays preserve the database-only commands above. Include both
+files whenever operating the full stack; the original database file alone does
+not start Keycloak. From this repository:
+
+```powershell
+docker compose --env-file .env.postgres -f compose.yaml -f compose.runtime.yaml up -d --build --wait --wait-timeout 180
+```
+
+Open http://localhost:8081. Native readiness is at
+http://localhost:9001/health/ready and liveness at `/health/live` on the same port.
+Both published ports bind only to 127.0.0.1. Management health is not exposed on
+the application port. This is local HTTP configuration, not cloud deployment.
+The pinned derived image builds PostgreSQL, health and metrics support before
+`start --optimized`. Its build context excludes credentials and source files.
+`KC_CACHE=local` selects a single-node runtime; clustering is future deployment work.
+A 768 MiB memory limit bounds this local container. Fresh initialization took
+about 106 seconds on the development machine; readiness uses bounded polling.
+
+Keycloak owns its generated tables in identity_db; existing storage is retained.
+Its built-in master realm initializes automatically. No administrator, application
+realm, user, OIDC client or email setup is provided by this step. The first-run
+administrator prompt is expected; complete account bootstrap only in step 2.4.
+
+To restart without deleting data:
+
+```powershell
+docker compose --env-file .env.postgres -f compose.yaml -f compose.runtime.yaml restart keycloak
+docker compose --env-file .env.postgres -f compose.yaml -f compose.runtime.yaml up -d --wait --wait-timeout 180
+```
+
+If PostgreSQL is unavailable, readiness must return 503. Restore the database,
+then explicitly restart Keycloak and wait for readiness as above. Automatic
+recovery without restart is not promised. Do not use `down --volumes` on local data.
+
+Disposable verification (no local volume or real accounts):
+
+```powershell
+docker compose -p datalens-identity-tests -f compose.test.yaml -f compose.runtime.test.yaml up -d --build --wait --wait-timeout 180
+$env:IDENTITY_DATABASE_TESTS = "1"
+$env:IDENTITY_RUNTIME_TESTS = "1"
+.\.venv\Scripts\python.exe -m pytest -q
+docker compose -p datalens-identity-tests -f compose.test.yaml -f compose.runtime.test.yaml down
+```
+
+Always perform test cleanup, including after failures. Runtime tests verify native
+health and database checks, public issuer, management isolation, realm identity
+across restart, failed startup with a wrong password, database-outage denial and
+explicit restart recovery. The required CI job `tests` runs the complete stack.
+Sources: [container build](https://www.keycloak.org/server/containers),
+[native health and database metrics](https://www.keycloak.org/observability/health).
+
+
+Internal service names are logical and omit the product prefix. Repository and
+folder names retain `datalens-`; Compose projects retain environment scope.
+Existing physical volume names are preserved to avoid replacing stored data.
+
+
+Naming verification: identity passes all **88 tests without skips**, including
+renamed runtime startup, restart, wrong-password and outage checks. Agent passes
+all **154 tests without skips**. Ruff and diff whitespace checks pass. Disposable
+test stacks were removed; persistent containers/data remain unchanged. Parent
+plans remain outside service pull requests.
