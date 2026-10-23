@@ -27,6 +27,8 @@ jobs:
           python-version: "3.12"
       - name: Install test tooling
         run: python -m pip install -r requirements.txt
+      - name: Install pinned browser and system dependencies
+        run: python -m playwright install --with-deps chromium
       - name: Start disposable identity runtime
         run: docker compose -p datalens-identity-tests -f compose.test.yaml -f compose.runtime.test.yaml up -d --build --wait --wait-timeout 180
       - name: Run tests

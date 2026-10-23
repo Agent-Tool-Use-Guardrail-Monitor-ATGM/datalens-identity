@@ -318,3 +318,65 @@ account removal, realm defaults, repeated realm initialization, restart retentio
 and denied administration for an unrelated application-like role all passed.
 Ruff/diff checks pass for the new files. Local real accounts were not created;
 the operator must run the protected prompt-based setup command above.
+
+
+## Application roles and OIDC client — step 2.5
+
+Implemented on `feature/oidc-client`, based on merged administrator setup PR #3
+(`c8f9e72`). Configure local identity after administrator onboarding:
+
+```powershell
+.\.venv\Scripts\python.exe tools/configure_oidc.py --admin maxim-admin
+```
+
+Use your actual administrator name. The password is prompted; no client secret,
+password or token is printed/saved. The tool creates client `agent-api`, client
+roles `user` and composite `admin` including `user`. These application roles grant
+no Keycloak administration privileges. Assign roles to accounts through the
+Keycloak console. Existing client configuration is checked for drift; existing
+secrets are preserved. Repeated setup does not recreate accounts.
+
+The confidential client requires a secret and authorization-code flow with S256
+PKCE. Callback: `http://localhost:8000/auth/callback`; logout destination:
+`http://localhost:8000/`. No wildcard redirect, browser CORS origin, password grant,
+implicit grant, device/CIBA grant, service-account grant or offline scope is enabled.
+Refresh rotation uses zero token reuse; concurrent refresh coordination and runtime
+revocation verification belong to later steps. Basic/email scopes provide subject
+and verified-email claims; custom mappers provide the intended `agent-api` audience
+and `resource_access.agent-api.roles` in access tokens and introspection.
+
+Retrieve the generated secret only through the protected Keycloak client
+Credentials page; never commit or put it in frontend code. The agent backend's
+secret storage, callback handler, session cookies, refresh and request authorization
+are plan 3 work. No functional application callback endpoint exists yet. The test
+callback server on port 18089 is isolated test tooling, not an agent API route.
+Azure/Vercel callback origins are not registered until actual domains are known.
+
+Current functionality: persistent independent PostgreSQL, Keycloak health and
+recovery, one-time platform administrator/realm onboarding, and application
+role/client configuration. The agent repository provides its existing FastAPI
+foundation, settings, database/migrations and health checks. LLM statistics runs,
+dataset tools, frontend UI, agent-side login enforcement and Kafka delivery are
+not implemented. Email invitations/activation remain step 2.6.
+
+Verification: the new focused acceptance uses real Chromium, synthetic accounts,
+a loopback callback server and disposable identity storage. CI installs the pinned
+browser before its existing required `tests` job. No live local users or clients
+were changed by development/testing. Parent plans remain outside this repository.
+Sources: [OIDC endpoints](https://www.keycloak.org/securing-apps/oidc-layers),
+[client administration](https://www.keycloak.org/docs/latest/server_admin/).
+
+
+Step 2.5 verification — 23 October 2026: focused Chromium/real-Keycloak
+acceptance passed in 32.60 seconds. Verified code/PKCE login with an exact loopback
+callback, issuer/subject/audience/email claims, composite admin/user roles in
+access tokens and introspection, denied Keycloak administration, rejected wrong
+verifier/client secret/redirect, missing PKCE, implicit flow, password grants and
+service-account grants. Repeated configuration preserves the client secret.
+The test uses basic/email scopes, a real callback server and fresh administrator
+authentication after realm initialization. Realm creation uses a bounded 60-second
+test timeout. Ruff and whitespace checks pass. Full previous suites were not
+rerun; required CI installs Chromium and runs all identity tests on the PR.
+No local live users or clients were changed; operator application of the new
+configuration remains explicit. No commit/push/PR was created. Stop before 2.6.
+Parent plans are local workspace documents outside service repositories/PRs.
