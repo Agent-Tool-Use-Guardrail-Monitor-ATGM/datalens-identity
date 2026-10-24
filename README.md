@@ -474,3 +474,80 @@ verified sender/domain and secret injection; actual inbox delivery remains
 unverified. No paid infrastructure or external messaging was used. Nothing was
 staged, committed, pushed or merged. Parent plans remain outside service PRs.
 Deliver this step through PR/required CI before requesting 2.7.
+
+
+## Existing-token lifecycle contract — step 2.7
+
+Implemented on `test/token-lifecycle`. Step 2.6 merge/check success and pull are
+accepted from the user's confirmation; no GitHub checks or fetch were repeated.
+This step adds focused integration tests, not agent authorization endpoints.
+
+The pinned Keycloak 26.8.1 matrix keeps the original access token while changing
+roles, group membership, composite roles, verified-email status and enabled state.
+The initial matrix passed in 37.61 seconds. Introspection reconstructs current
+roles/email status. Removing an extra direct user grant still allows that
+permission through composite admin. Removing all grants removes that permission;
+an active token by itself is insufficient to authorize an application request.
+
+Disabling a user made the token inactive. Re-enabling that user made the original
+token active again. To invalidate access permanently, disable the account and
+terminate its identity sessions; re-enabling is not a substitute for logout.
+Logout invalidated access and refresh. An expired access token was replaceable
+while its identity session remained valid; reusing a rotated refresh token was
+rejected. Wrong introspection credentials and unintended audiences were rejected.
+
+Plan 3 must perform live checks on every authorization decision with no positive
+cache. Check active=true, issuer/audience/subject, current roles and boolean
+email_verified. Missing/malformed claims, invalid JSON, non-success HTTP responses,
+timeouts and transport failures must yield no authorization; never fall back to
+an old successful response. Browser cookies, token encryption, atomic refresh
+rotation and the actual agent-side fail-closed implementation remain plan 3 work.
+Malformed responses are an application fault-injection case for plan 3, not an
+observed response from the real Keycloak service in this step.
+
+Focused synthetic run (start both test Compose files first):
+
+```powershell
+$env:IDENTITY_RUNTIME_TESTS = "1"
+.\.venv\Scripts\python.exe -m pytest -q tests/test_token_lifecycle.py
+```
+
+Use disposable storage only. No tokens are saved, printed or added to artifacts.
+No live identity accounts or agent access controls were changed by this step.
+Source: [OIDC introspection](https://www.keycloak.org/securing-apps/oidc-layers),
+[version-pinned introspection source](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/protocol/oidc/AccessTokenIntrospectionProvider.java).
+
+
+Step 2.7 verification — 24 October 2026: the extended focused acceptance passed
+in **87.38 seconds** against pinned Keycloak 26.8.1, disposable PostgreSQL and real
+Chromium. The same original access token was inspected after direct-role,
+group-membership, composite-role, verified-email and enabled-state changes.
+Removing an extra direct user grant retained permission through composite admin;
+removing all remaining grants removed it. Logout invalidated access and renewal.
+The wrong introspection client secret and unintended audience were rejected.
+
+An access token with an observed three-second issued lifetime became inactive
+under bounded polling, then its valid refresh credential produced a valid
+replacement. Reusing the rotated refresh credential failed. A newly expired
+identity session could not be renewed. Stopping the disposable identity service
+produced an HTTP transport error with no claims; restart readiness succeeded.
+Re-enabling a disabled user restored the original token's activity: terminate
+identity sessions as well when permanent invalidation is intended.
+
+An earlier fixed four-second expiry wait failed once; the final test verifies
+issued lifetime and polls within a 15-second bound instead. Earlier repeated
+fixture runs encountered setup timeouts and an administrator-token failure.
+Their exact underlying resource/session cause was not established; no product
+behavior was weakened to bypass them. Docker was stopped during investigation,
+then restarted with permission for focused verification. Full previous suites
+and GitHub merge/check verification were not repeated, as requested. Prior step
+2.6 delivery is accepted from the user's confirmation.
+
+Actual agent authorization, no-positive-cache behavior, malformed/missing-claim
+fault injection, token storage and coordinated refresh remain plan 3 work. This
+identity acceptance proves provider behavior; it does not implement the agent's
+fail-closed authorization path. No live user data or production configuration
+was modified. Ruff/format/diff checks passed; disposable test resources were
+removed. Nothing was staged, committed, pushed or merged. Parent plans remain
+outside service Git repositories and pull requests. Deliver this step through
+PR/required CI, then request 2.8 separately.
