@@ -69,7 +69,7 @@ runtime startup. Startup bootstrap variables do not reset existing administrator
 
 | Material | Safe sequence |
 |---|---|
-| Client secret | Coordinate maintenance with the backend owner; regenerate through the protected console; replace the backend secret; reload and verify introspection/refresh. This baseline does not promise dual-secret overlap. Existing sessions may require login. Terminate sessions on compromise. |
+| Client secret | Coordinate maintenance with the backend owner; regenerate through the protected console; replace the backend secret; reload and verify token exchange/refresh. Optional introspection remains a diagnostic. This baseline does not promise dual-secret overlap. Existing sessions may require login. Terminate sessions on compromise. |
 | PostgreSQL application/bootstrap login | Change the actual database role password through protected administration, then update the matching ignored/deployment secret and restart affected connections. Startup environment variables and fresh-storage init scripts do not rotate existing SQL passwords. Do not delete storage. |
 | Platform administrator password | Change through authenticated account/console recovery, confirm a working administrator and invalidate affected sessions as appropriate. Keep platform and application roles separate. |
 | Signing keys | Back up first, use a reviewed Keycloak key-rotation procedure and retain verification keys for the supported transition. Plan 3 must refresh JWKS safely; no signing-key rotation was exercised here. |
@@ -115,3 +115,11 @@ live local accounts/storage.
 
 Sources: [realm import/export limits](https://www.keycloak.org/server/importExport),
 [administrator recovery](https://www.keycloak.org/server/bootstrap-admin-recovery).
+
+
+Authorization revision — 27 October 2026: ordinary agent requests will validate
+JWTs locally using bounded cached keys. Identity disable/logout is not guaranteed
+to reject an already issued token until expiry at an offline verifier. During
+compromise response, invalidate local application sessions where possible and
+account for cached signing-key trust separately. No new revocation service or
+backchannel dependency was introduced; see the updated integration handoff.

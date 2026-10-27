@@ -496,14 +496,22 @@ Logout invalidated access and refresh. An expired access token was replaceable
 while its identity session remained valid; reusing a rotated refresh token was
 rejected. Wrong introspection credentials and unintended audiences were rejected.
 
-Plan 3 must perform live checks on every authorization decision with no positive
-cache. Check active=true, issuer/audience/subject, current roles and boolean
-email_verified. Missing/malformed claims, invalid JSON, non-success HTTP responses,
-timeouts and transport failures must yield no authorization; never fall back to
-an old successful response. Browser cookies, token encryption, atomic refresh
-rotation and the actual agent-side fail-closed implementation remain plan 3 work.
-Malformed responses are an application fault-injection case for plan 3, not an
-observed response from the real Keycloak service in this step.
+**Policy revision — 27 October 2026:** plan 3 now validates JWTs locally with
+trusted cached signing keys; no per-request introspection is required. The
+provider matrix above is historical diagnostic evidence. Access-token claims
+remain authoritative only until that token expires (maximum 300 seconds with
+zero initial expiry leeway). Remote role/email/account/logout changes may lag
+until then. Local application session logout remains immediate. Valid tokens
+with still-trusted keys continue through identity outages; required refresh or
+unknown/expired key trust fails safely if Keycloak is unavailable. No expired
+or unverifiable token is accepted. The key trust lease is at most one hour, with
+bounded/rate-limited refresh; signing-key compromise has a separate trust window.
+See [the revised handoff](docs/identity_handoff.md).
+
+Agent code still needs to implement this in plan 3. Cookies, encrypted server-side
+tokens and coordinated refresh remain unchanged. Existing introspection tests
+stay in CI as provider diagnostics; their passing results do not mean the agent
+will make a network request on every authorization decision.
 
 Focused synthetic run (start both test Compose files first):
 
@@ -543,7 +551,7 @@ then restarted with permission for focused verification. Full previous suites
 and GitHub merge/check verification were not repeated, as requested. Prior step
 2.6 delivery is accepted from the user's confirmation.
 
-Actual agent authorization, no-positive-cache behavior, malformed/missing-claim
+Actual agent local-JWT authorization, bounded-delay behavior, malformed/missing-claim
 fault injection, token storage and coordinated refresh remain plan 3 work. This
 identity acceptance proves provider behavior; it does not implement the agent's
 fail-closed authorization path. No live user data or production configuration
@@ -577,3 +585,10 @@ Identity configuration, activation and lifecycle behavior are now ready for that
 integration after this documentation/test step passes its PR gate. Stop before
 plan 3; create it only when requested. Nothing committed or pushed by this step.
 Parent planning files remain outside service Git repositories/pull requests.
+
+
+Documentation-only authorization revision — 27 October 2026: local token
+validation replaces mandatory live introspection. No identity runtime, role
+mapping, token lifetime or completed diagnostic test changed. Both public-key
+caching and fresh token validation are required; login/refresh still depend on
+Keycloak. Service docs use `docs/local-token-validation`; parent plans are outside Git.
