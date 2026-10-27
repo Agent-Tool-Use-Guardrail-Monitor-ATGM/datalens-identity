@@ -551,3 +551,29 @@ was modified. Ruff/format/diff checks passed; disposable test resources were
 removed. Nothing was staged, committed, pushed or merged. Parent plans remain
 outside service Git repositories and pull requests. Deliver this step through
 PR/required CI, then request 2.8 separately.
+
+
+## Plan 2 completion and integration handoff — step 2.8
+
+Current branch: `docs/recovery-handoff`. Prior step 2.7 merge/check success and
+pull are accepted from the user's confirmation; no remote checks were repeated.
+
+- [Non-secret plan 3 contract](docs/identity_handoff.md): pinned images, endpoints,
+  issuer/audience/roles, callbacks, lifetimes, secret transfer and access rules.
+- [Reproduction/recovery runbook](docs/recovery.md): fresh/existing setup, reviewed
+  configuration updates, recovery, rotation, backup/upgrade/rollback boundaries.
+
+The new retained-storage acceptance passed in **98.70 seconds**. A fresh isolated
+named-volume instance completed administrator/realm/client/SMTP setup; container
+removal and recreation retained administrator login, realm/account IDs and the
+client secret. Reapplying managed settings preserved them. Its guarded disposable
+volume was removed; local data was not touched. Ruff/format/whitespace checks pass.
+The existing required `tests` job automatically collects this test. Full previous
+suites were not rerun, and new PR/CI delivery remains pending. No live local
+onboarding, backup restore, image upgrade, production SMTP or cloud deployment was
+performed. Actual agent-side login/access enforcement remains plan 3 work.
+
+Identity configuration, activation and lifecycle behavior are now ready for that
+integration after this documentation/test step passes its PR gate. Stop before
+plan 3; create it only when requested. Nothing committed or pushed by this step.
+Parent planning files remain outside service Git repositories/pull requests.
