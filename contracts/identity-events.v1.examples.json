@@ -1,0 +1,91 @@
+[
+  {
+    "schema_version": 1,
+    "event_id": "00000000-0000-4000-8000-000000000001",
+    "event_type": "user.created",
+    "issuer": "http://localhost:8081/realms/datalens",
+    "subject": "00000000-0000-4000-8000-000000000099",
+    "occurred_at": "2026-11-09T12:00:00Z",
+    "data": {
+      "profile_revision": 1,
+      "display_name": null,
+      "username": null,
+      "email": null
+    }
+  },
+  {
+    "schema_version": 1,
+    "event_id": "00000000-0000-4000-8000-000000000002",
+    "event_type": "user.profile.updated",
+    "issuer": "http://localhost:8081/realms/datalens",
+    "subject": "00000000-0000-4000-8000-000000000099",
+    "occurred_at": "2026-11-09T12:00:00Z",
+    "data": {
+      "profile_revision": 1,
+      "display_name": null,
+      "username": null,
+      "email": null
+    }
+  },
+  {
+    "schema_version": 1,
+    "event_id": "00000000-0000-4000-8000-000000000003",
+    "event_type": "user.session.revoked",
+    "issuer": "http://localhost:8081/realms/datalens",
+    "subject": "00000000-0000-4000-8000-000000000099",
+    "occurred_at": "2026-11-09T12:00:00Z",
+    "data": {
+      "security_revision": 1,
+      "session_id": "synthetic-session",
+      "reason": "logout"
+    }
+  },
+  {
+    "schema_version": 1,
+    "event_id": "00000000-0000-4000-8000-000000000004",
+    "event_type": "user.sessions.revoked",
+    "issuer": "http://localhost:8081/realms/datalens",
+    "subject": "00000000-0000-4000-8000-000000000099",
+    "occurred_at": "2026-11-09T12:00:00Z",
+    "data": {
+      "security_revision": 1,
+      "tokens_issued_at_or_before": 1794225600,
+      "reason": "logout_all"
+    }
+  },
+  {
+    "schema_version": 1,
+    "event_id": "00000000-0000-4000-8000-000000000005",
+    "event_type": "user.disabled",
+    "issuer": "http://localhost:8081/realms/datalens",
+    "subject": "00000000-0000-4000-8000-000000000099",
+    "occurred_at": "2026-11-09T12:00:00Z",
+    "data": {
+      "security_revision": 1,
+      "tokens_issued_at_or_before": 1794225600
+    }
+  },
+  {
+    "schema_version": 1,
+    "event_id": "00000000-0000-4000-8000-000000000006",
+    "event_type": "user.enabled",
+    "issuer": "http://localhost:8081/realms/datalens",
+    "subject": "00000000-0000-4000-8000-000000000099",
+    "occurred_at": "2026-11-09T12:00:00Z",
+    "data": {
+      "security_revision": 1
+    }
+  },
+  {
+    "schema_version": 1,
+    "event_id": "00000000-0000-4000-8000-000000000007",
+    "event_type": "user.deleted",
+    "issuer": "http://localhost:8081/realms/datalens",
+    "subject": "00000000-0000-4000-8000-000000000099",
+    "occurred_at": "2026-11-09T12:00:00Z",
+    "data": {
+      "security_revision": 1,
+      "tokens_issued_at_or_before": 1794225600
+    }
+  }
+]
