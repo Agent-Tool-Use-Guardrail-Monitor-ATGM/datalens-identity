@@ -6,6 +6,15 @@ Python is configuration/test tooling; there is no custom authentication API.
 
 ## Current progress
 
+**Current: 3.8.4.1 identity-event contracts**, on `fix/identity-event-contracts`.
+[Integration sequence and wire contract](docs/identity-event-integration.md):
+seven identity event types, JSON Schema, synthetic examples and strict decoding.
+Contract gate: **46 passed**; full unit gate: **134 passed, 21 deselected**.
+Ruff lint, changed-file formatting, dependency and whitespace checks pass.
+Required PR `tests`/delivery remain pending; no commits or pushes made here.
+3.8.3 delivery is accepted from user confirmation. No broker, source listener,
+database migration or account-policy enforcement is added. Stop before 3.8.4.2.
+
 **Latest: step 3.8.3, public frontend OAuth client and Account Console.**
 Verified locally on `fix/bearer-authentication-migration`: **109 tests passed in
 377.38 seconds**, including real public/confidential browser flows and database
