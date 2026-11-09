@@ -6,6 +6,23 @@ Python is configuration/test tooling; there is no custom authentication API.
 
 ## Current progress
 
+**Latest: step 3.8.3, public frontend OAuth client and Account Console.**
+Verified locally on `fix/bearer-authentication-migration`: **109 tests passed in
+377.38 seconds**, including real public/confidential browser flows and database
+recovery. Unit-only gate: 88 passed, 21 deselected. Ruff lint, formatting of changed
+Python files, dependency and whitespace checks pass. A whole-tree format check
+also reported an unchanged formatting issue in `tools/check_config.py`; it was
+left outside this step. Required GitHub `tests` and PR delivery remain pending.
+[Frontend setup and handoff](docs/frontend_pkce_handoff.md)
+defines explicit administrator commands, exact origins and memory-only PKCE.
+Existing confidential `agent-api` configuration is preserved; current agent HTTP
+authentication is not switched. No team/cloud realm was configured automatically.
+Native password changes require opting into sign-out from other devices;
+mandatory source-side enforcement is a 3.8.4 prerequisite, not delivered here.
+
+The older delivery records below are historical; Plan 2 steps 2.1–2.8 are
+delivered per user pull confirmation. Plan 3.8 adds the new frontend migration.
+
 Step 2.1 is present on main at `e4a5a1e`; its required `tests` check succeeded.
 The active rules require PRs, passing `tests`, up-to-date branches, and block
 force pushes/deletions. The repository was initialized with its foundation;

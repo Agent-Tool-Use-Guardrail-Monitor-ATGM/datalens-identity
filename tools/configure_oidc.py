@@ -9,6 +9,37 @@ from bootstrap_identity import Admin, SetupError
 CLIENT = "agent-api"
 
 
+def api_token_mappers():
+    """Fresh audience/API-role mappers shared by confidential and public clients."""
+    return [
+        {
+            "name": "agent-audience",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-audience-mapper",
+            "config": {
+                "included.client.audience": CLIENT,
+                "access.token.claim": "true",
+                "introspection.token.claim": "true",
+                "id.token.claim": "false",
+            },
+        },
+        {
+            "name": "agent-roles",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-usermodel-client-role-mapper",
+            "config": {
+                "usermodel.clientRoleMapping.clientId": CLIENT,
+                "claim.name": "resource_access.agent-api.roles",
+                "jsonType.label": "String",
+                "multivalued": "true",
+                "access.token.claim": "true",
+                "introspection.token.claim": "true",
+                "id.token.claim": "false",
+            },
+        },
+    ]
+
+
 def configure(admin, realm, callback_origin):
     base = realm + "/clients"
     clients = admin.request("GET", base + "?clientId=" + CLIENT).json()
@@ -33,33 +64,7 @@ def configure(admin, realm, callback_origin):
             "oauth2.device.authorization.grant.enabled": "false",
             "oidc.ciba.grant.enabled": "false",
         },
-        "protocolMappers": [
-            {
-                "name": "agent-audience",
-                "protocol": "openid-connect",
-                "protocolMapper": "oidc-audience-mapper",
-                "config": {
-                    "included.client.audience": CLIENT,
-                    "access.token.claim": "true",
-                    "introspection.token.claim": "true",
-                    "id.token.claim": "false",
-                },
-            },
-            {
-                "name": "agent-roles",
-                "protocol": "openid-connect",
-                "protocolMapper": "oidc-usermodel-client-role-mapper",
-                "config": {
-                    "usermodel.clientRoleMapping.clientId": CLIENT,
-                    "claim.name": "resource_access.agent-api.roles",
-                    "jsonType.label": "String",
-                    "multivalued": "true",
-                    "access.token.claim": "true",
-                    "introspection.token.claim": "true",
-                    "id.token.claim": "false",
-                },
-            },
-        ],
+        "protocolMappers": api_token_mappers(),
     }
     if not clients:
         admin.request("POST", base, desired)
