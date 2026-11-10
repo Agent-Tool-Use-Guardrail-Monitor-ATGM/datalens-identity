@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+ xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+ xsi:schemaLocation="http://www.liquibase.org/xml/ns/dbchangelog https://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.25.xsd">
+ <changeSet id="identity-outbox-001" author="datalens">
+  <createTable tableName="dl_identity_revision">
+   <column name="realm_id" type="varchar(64)"><constraints nullable="false" primaryKey="true" primaryKeyName="dl_identity_revision_pk"/></column>
+   <column name="subject" type="varchar(255)"><constraints nullable="false" primaryKey="true" primaryKeyName="dl_identity_revision_pk"/></column>
+   <column name="profile_revision" type="bigint"><constraints nullable="false"/></column>
+   <column name="security_revision" type="bigint"><constraints nullable="false"/></column>
+  </createTable>
+  <sql>ALTER TABLE dl_identity_revision ADD CONSTRAINT dl_identity_revision_nonnegative CHECK (profile_revision &gt;= 0 AND security_revision &gt;= 0)</sql>
+  <createTable tableName="dl_identity_outbox">
+   <column name="event_id" type="varchar(36)"><constraints nullable="false" primaryKey="true"/></column>
+   <column name="realm_id" type="varchar(64)"><constraints nullable="false"/></column>
+   <column name="subject" type="varchar(255)"><constraints nullable="false"/></column>
+   <column name="payload" type="text"><constraints nullable="false"/></column>
+   <column name="created_at_ms" type="bigint"><constraints nullable="false"/></column>
+  </createTable>
+  <sql>ALTER TABLE dl_identity_outbox ADD CONSTRAINT dl_identity_outbox_size CHECK (octet_length(payload) &lt;= 16384)</sql>
+  <createIndex tableName="dl_identity_outbox" indexName="dl_identity_outbox_created"><column name="created_at_ms"/><column name="event_id"/></createIndex>
+ </changeSet>
+</databaseChangeLog>

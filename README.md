@@ -6,6 +6,16 @@ Python is configuration/test tooling; there is no custom authentication API.
 
 ## Current progress
 
+**Current: 3.8.4.2 transactional source proof**, on `fix/transactional-identity-outbox`.
+[Proof, tables, rollback semantics and limits](docs/transactional-outbox-proof.md).
+Pinned Java/Keycloak provider added only to the disposable test image; production
+image/realm configuration is unchanged. Focused real transaction gate passed in
+45.82 seconds; unit gate 134 passed/22 deselected. **Final full regression: 156 passed in 435.03 seconds, 10 November 2026.**
+The prior full attempt had 155 passes and an existing host/VM clock-skew expiry
+failure; its test-only correction passed separately in 65.63 seconds. No token
+policy was relaxed. Required PR checks/delivery remain pending. Stop before 3.8.4.3.
+Older progress snapshots below are historical.
+
 **Current: 3.8.4.1 identity-event contracts**, on `fix/identity-event-contracts`.
 [Integration sequence and wire contract](docs/identity-event-integration.md):
 seven identity event types, JSON Schema, synthetic examples and strict decoding.

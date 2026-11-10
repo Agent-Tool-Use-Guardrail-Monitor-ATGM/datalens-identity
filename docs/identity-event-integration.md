@@ -1,16 +1,17 @@
 # Identity integration: plan 3.8.4
 
-Updated 9 November 2026. Branch: `fix/identity-event-contracts`.
+Updated 10 November 2026. Current branch: `fix/transactional-identity-outbox`.
 Implement one slice, verify it and stop before the next.
 
 ## Sequence
 
-1. **3.8.4.1 Contracts (current):** JSON Schema, synthetic examples, strict
+1. **3.8.4.1 Contracts (delivered):** JSON Schema, synthetic examples, strict
    bounded decoding and tests. No runtime process invokes the decoder yet.
-2. **3.8.4.2 Transactional source proof:** pinned Keycloak Event Listener SPI/JPA
+2. **3.8.4.2 Transactional source proof (current):** pinned Keycloak Event Listener SPI/JPA
    provider and disposable tests proving outbox intent commits/rolls back with
-   user/admin account mutations. Allocate independent profile/security counters
-   with database coordination and consistent lock order. Do not substitute
+   administrative account mutations. Establish separate profile/security counter
+   storage and prove concurrent profile allocation with database coordination.
+   Security allocation is verified with the mappings in 3.8.4.3. Do not substitute
    in-memory or after-commit-only sending for atomic durable intent.
 3. **3.8.4.3 Mappings/enforcement:** canonical snapshots, session/user revocation,
    enable/disable and deletion, covering user/admin actions. Enforce password
@@ -28,6 +29,14 @@ Implement one slice, verify it and stop before the next.
    remains 3.8.5; cloud infrastructure and availability guarantees remain Plan 10.
 
 This expands an existing stage into reviewable slices, not another top-level plan.
+
+3.8.4.1 delivery is accepted from user confirmation. The
+[3.8.4.2 proof](transactional-outbox-proof.md) demonstrates administrative creation/
+profile writes, rollback and concurrent profile counters in the disposable image.
+Security counters start at zero; complete security allocation/mappings are not
+implemented. Focused real gate passed; final full regression passed (156 tests in 435.03 seconds, 10 November 2026). No broker
+or production realm activation. Stop before 3.8.4.3. Verification below records
+the earlier contract-only stage, not final source-proof regression.
 
 ## Wire contract
 
