@@ -293,12 +293,15 @@ def test_existing_token_authorization_and_refresh_lifecycle(monkeypatch):
                 # Expired identity sessions cannot be renewed, independently of logout.
                 admin.request("PUT", realm, {"ssoSessionMaxLifespan": 3})
                 expired_session = login()
-                expiration = json.loads(
+                session_claims = json.loads(
                     base64.urlsafe_b64decode(expired_session["refresh_token"].split(".")[1] + "==")
-                )["exp"]
-                delay = max(0, expiration - time.time()) + 2
-                assert delay <= 15, "Test refresh token did not inherit the short session lifetime."
-                time.sleep(delay)
+                )
+                duration = session_claims["exp"] - session_claims["iat"]
+                assert 0 < duration <= 3, (
+                    "Test refresh token did not inherit the short session lifetime."
+                )
+                # Both claims use the server clock; Docker and host wall clocks may differ.
+                time.sleep(duration + 2)
                 assert refresh(expired_session["refresh_token"]).status_code == 400
                 # Transport unavailability yields no claims; plan 3 must fail closed.
                 try:

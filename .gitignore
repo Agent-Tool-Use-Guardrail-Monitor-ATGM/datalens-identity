@@ -9,6 +9,7 @@ __pycache__/
 htmlcov/
 build/
 dist/
+provider/target/
 *.egg-info/
 
 # Local secrets and captured identity data.

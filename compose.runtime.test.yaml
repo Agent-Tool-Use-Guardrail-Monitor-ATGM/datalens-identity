@@ -3,7 +3,7 @@ services:
   identity-keycloak:
     build:
       context: .
-      dockerfile: docker/keycloak/Dockerfile
+      dockerfile: docker/keycloak/Dockerfile.outbox-test
     command: ["start", "--optimized"]
     environment:
       KC_DB_URL: jdbc:postgresql://identity-postgres:5432/identity_test_db

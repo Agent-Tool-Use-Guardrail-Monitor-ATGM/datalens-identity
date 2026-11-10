@@ -1,5 +1,10 @@
-# The derived image needs no source files or local credentials in its context.
+# Allow only production/proof Dockerfiles and provider sources; never local credentials.
 **
 !docker/
 !docker/keycloak/
 !docker/keycloak/Dockerfile
+!docker/keycloak/Dockerfile.outbox-test
+!provider/
+!provider/pom.xml
+!provider/src/
+!provider/src/**
