@@ -6,6 +6,21 @@ Python is configuration/test tooling; there is no custom authentication API.
 
 ## Current progress
 
+**11 November 2026 - 3.8.4.4.2 identity publisher**
+
+Implemented on `feat/identity-publisher`. The standalone process claims
+committed PostgreSQL outbox rows, publishes persistent RabbitMQ messages with
+stable IDs, and records broker confirms. Failed sends retry. Backlog warnings
+and bounded seven-day retention cover publisher operations.
+
+The disposable migration and local broker integration passed. **150 unit
+tests and focused runtime checks passed**, covering the scoped database role,
+broker outage and recovery, stale-claim fencing, stable IDs, and retention of
+pending rows. Required full Linux PR CI is pending. Hosted activation and
+coordinated transport acceptance are separate steps.
+
+[Publisher setup and operations](docs/identity-publisher.md).
+
 **11 November 2026 - 3.8.4.3.3 password enforcement**
 
 Implemented on `fix/password-session-revocation`. Keycloak password changes

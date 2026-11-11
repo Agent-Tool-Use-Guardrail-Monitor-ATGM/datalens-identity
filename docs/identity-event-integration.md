@@ -1,13 +1,12 @@
 # Identity integration: plan 3.8.4
 
-Updated 11 November 2026. Current branch: `fix/password-session-revocation`.
+Updated 11 November 2026. Current branch: `feat/identity-publisher`.
 Implement one slice, verify it and stop before the next.
 
 **Broker ownership revision, 10 November 2026:** RabbitMQ deployment, persistent
 storage, topology and permissions belong to separate repository
 `datalens-messaging`. Identity retains its transactional source, outbox, schemas
-and publisher; the agent retains its consumer/projection. The broker is not
-provisioned yet. Internal broker service name is `rabbitmq`, superseding the
+and publisher; the agent retains its consumer/projection. The local broker foundation is merged. Internal broker service name is `rabbitmq`, superseding the
 earlier `identity-rabbitmq` planning name. This changes repository ownership only.
 
 ## Sequence
@@ -45,6 +44,8 @@ earlier `identity-rabbitmq` planning name. This changes repository ownership onl
    and **3.8.4.4.2 publisher** in `datalens-identity`. The messaging repository
    provisions topology; identity connects through a configured endpoint with
    scoped credentials and validates the expected topology.
+   The [publisher](identity-publisher.md) is implemented and locally verified.
+   Required Linux PR CI is pending.
 5. **3.8.4.5 Transport acceptance:** durable exchange `identity.events.v1`, queue
    `agent.identity.v1`, dead-letter queue `agent.identity.dead.v1`; disposable
    restart/outage/redelivery, permission and poison-message tests. Agent consumer
