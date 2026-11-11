@@ -3,6 +3,7 @@
 import json
 import secrets
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from uuid import UUID
 
 import httpx
@@ -173,8 +174,62 @@ def test_account_and_outbox_share_commit_rollback_and_revision_lock(runtime, mon
 
         update(5)
         assert sorted(e["data"]["profile_revision"] for e in events()) == [1, 2, 3, 4, 5, 6]
-        saved = {e["event_id"]: e for e in events()}
-        admin.request("DELETE", f"{realm}/users/{subject}")
+        user_path = f"{realm}/users/{subject}"
+        before_security = events()
+        # Let the profile insert succeed, then reject the security event in the same transaction.
+        assert (
+            runtime.sql("""
+            ALTER TABLE dl_identity_outbox ADD CONSTRAINT dl_security_reject
+            CHECK ((payload::jsonb ->> 'event_type') <> 'user.disabled') NOT VALID;
+            """).returncode
+            == 0
+        )
+        try:
+            admin.request("PUT", user_path, {"enabled": False}, expected=(400, 500))
+            assert admin.request("GET", user_path).json()["enabled"] is True
+            assert {e["event_id"] for e in events()} == {e["event_id"] for e in before_security}
+        finally:
+            assert (
+                runtime.sql(
+                    "ALTER TABLE dl_identity_outbox DROP CONSTRAINT dl_security_reject;"
+                ).returncode
+                == 0
+            )
+
+        admin.request("PUT", user_path, {"enabled": False})
+        admin.request("PUT", user_path, {"enabled": False})
+        admin.request("PUT", user_path, {"enabled": True})
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = [pool.submit(admin.request, "POST", user_path + "/logout") for _ in range(2)]
+            assert [result.result().status_code for result in results] == [204, 204]
+        admin.request("DELETE", user_path)
+        admin.request("DELETE", user_path, expected=(404,))
+        all_events = events()
+        assert sorted(
+            e["data"]["profile_revision"] for e in all_events if "profile_revision" in e["data"]
+        ) == list(range(1, 10))
+        security = sorted(
+            (e for e in all_events if "security_revision" in e["data"]),
+            key=lambda e: e["data"]["security_revision"],
+        )
+        assert [e["event_type"] for e in security] == [
+            "user.disabled",
+            "user.enabled",
+            "user.sessions.revoked",
+            "user.sessions.revoked",
+            "user.deleted",
+        ]
+        assert [e["data"]["security_revision"] for e in security] == list(range(1, 6))
+        for event in security:
+            assert event["subject"] == subject
+            cutoff = event["data"].get("tokens_issued_at_or_before")
+            if event["event_type"] == "user.enabled":
+                assert cutoff is None
+            else:
+                assert cutoff == int(datetime.fromisoformat(event["occurred_at"]).timestamp())
+            if event["event_type"] == "user.sessions.revoked":
+                assert event["data"]["reason"] == "logout_all"
+        saved = {e["event_id"]: e for e in all_events}
         assert {e["event_id"]: e for e in events()} == saved
         assert runtime.command("restart", "--no-deps", "identity-keycloak").returncode == 0
         assert runtime.command("up", "-d", "--wait", "--wait-timeout", "180").returncode == 0
