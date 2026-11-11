@@ -1,6 +1,6 @@
 # Identity integration: plan 3.8.4
 
-Updated 11 November 2026. Current branch: `feat/identity-publisher`.
+Updated 11 November 2026. Current branch: `test/identity-transport`.
 Implement one slice, verify it and stop before the next.
 
 **Broker ownership revision, 10 November 2026:** RabbitMQ deployment, persistent
@@ -45,11 +45,19 @@ earlier `identity-rabbitmq` planning name. This changes repository ownership onl
    provisions topology; identity connects through a configured endpoint with
    scoped credentials and validates the expected topology.
    The [publisher](identity-publisher.md) is implemented and locally verified.
-   Required Linux PR CI is pending.
-5. **3.8.4.5 Transport acceptance:** durable exchange `identity.events.v1`, queue
+   Linux CI passed and PR #16 merged.
+5. **3.8.4.5 Transport acceptance (local checks passed, PR CI pending):** durable exchange `identity.events.v1`, queue
    `agent.identity.v1`, dead-letter queue `agent.identity.dead.v1`; disposable
    restart/outage/redelivery, permission and poison-message tests. Agent consumer
    remains 3.8.5; cloud infrastructure and availability guarantees remain Plan 10.
+
+The transport check uses Keycloak's real profile and security events from
+PostgreSQL. It restores RabbitMQ after an outage and verifies the publisher's
+confirmed records. It recreates the broker before consumption, closes an
+unacknowledged channel to prove redelivery, and compares the decoded messages
+with their source events. A malformed delivery is rejected without requeue.
+The test verifies the dead-letter queue through operator access and confirms
+that the scoped consumer cannot read it.
 
 This expands an existing stage into reviewable slices, not another top-level plan.
 

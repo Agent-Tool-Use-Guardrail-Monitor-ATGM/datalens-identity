@@ -6,7 +6,20 @@ Python is configuration/test tooling; there is no custom authentication API.
 
 ## Current progress
 
-**11 November 2026 - 3.8.4.4.2 identity publisher**
+**11 November 2026 - 3.8.4.5 transport acceptance**
+
+Implemented on `test/identity-transport`. The disposable check sends real
+Keycloak outbox events through the publisher and the pinned RabbitMQ
+topology. It verifies outage recovery, confirms, persistence after broker
+replacement, manual redelivery, exact event IDs and payloads, and rejection
+of malformed messages into a dead-letter queue that the consumer cannot read.
+
+Local transport acceptance and 150 unit tests passed. Required Linux PR CI
+is pending. The consumer used here is a test probe. Plan 3.8.5 adds the agent
+consumer after verified PR delivery. Parent planning files are outside the
+identity PR.
+
+**Previous milestone: 3.8.4.4.2 identity publisher.** [Identity PR #16](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/pull/16) passed [Linux CI](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/actions/runs/43082592535) and merged as `5b8e6dc`.
 
 Implemented on `feat/identity-publisher`. The standalone process claims
 committed PostgreSQL outbox rows, publishes persistent RabbitMQ messages with
@@ -16,7 +29,7 @@ and bounded seven-day retention cover publisher operations.
 The disposable migration and local broker integration passed. **150 unit
 tests and focused runtime checks passed**, covering the scoped database role,
 broker outage and recovery, stale-claim fencing, stable IDs, and retention of
-pending rows. Required full Linux PR CI is pending. Hosted activation and
+pending rows. The full Linux PR gate later passed. Hosted activation and
 coordinated transport acceptance are separate steps.
 
 [Publisher setup and operations](docs/identity-publisher.md).

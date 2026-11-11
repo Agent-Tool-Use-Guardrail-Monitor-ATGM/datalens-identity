@@ -2,19 +2,27 @@
 
 import json
 import secrets
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
+import pika
 import pytest
 from bootstrap_identity import Admin, create_realm
-from identity_events import decode_event
+from identity_events import EventContractError, decode_event
+from identity_publisher import RabbitPublisher, broker_parameters, publish_one
+from test_publisher import AMQP_ERRORS, QUEUE, amqp_url
+from test_publisher import broker_project as broker_project
+from test_publisher import publisher_database as publisher_database
 from test_runtime import runtime as runtime
 
 
 @pytest.mark.runtime
-def test_account_and_outbox_share_commit_rollback_and_revision_lock(runtime, monkeypatch):
+def test_account_and_outbox_share_commit_rollback_and_revision_lock(
+    runtime, monkeypatch, publisher_database, broker_project
+):
     admin_name = "outbox-test-" + secrets.token_hex(4)
     password = "Outbox-Test!29" + secrets.token_urlsafe(24)
     monkeypatch.setenv("KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD", password)
@@ -235,6 +243,7 @@ def test_account_and_outbox_share_commit_rollback_and_revision_lock(runtime, mon
         assert runtime.command("up", "-d", "--wait", "--wait-timeout", "180").returncode == 0
         assert {e["event_id"]: e for e in events()} == saved
         assert all(len(json.dumps(e).encode()) <= 16384 for e in saved.values())
+        verify_transport(publisher_database[0], broker_project, issuer, realm_id, saved)
     finally:
         admin.close()
         cleanup = Admin(origin, admin_name, password)
@@ -242,3 +251,104 @@ def test_account_and_outbox_share_commit_rollback_and_revision_lock(runtime, mon
             cleanup.request("DELETE", realm, expected=(204, 404))
         finally:
             cleanup.close()
+
+
+def verify_transport(connection, broker_project, issuer, realm_id, expected):
+    compose, _ = broker_project
+    broker = RabbitPublisher(broker_parameters(amqp_url(broker_project, "identity-publisher")))
+    compose("stop", "rabbitmq")
+    try:
+        with pytest.raises(AMQP_ERRORS):
+            while publish_one(connection, broker, issuer):
+                pass
+    finally:
+        broker.close()
+
+    def confirmed():
+        return connection.execute(
+            "SELECT count(*) FROM dl_identity_outbox WHERE published_at IS NOT NULL "
+            "AND event_id = ANY(%s)",
+            (list(expected),),
+        ).fetchone()[0]
+
+    assert confirmed() == 0
+    compose("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "180")
+    broker = RabbitPublisher(broker_parameters(amqp_url(broker_project, "identity-publisher")))
+    poison_id = str(uuid4())
+    try:
+        deadline = time.monotonic() + 20
+        while confirmed() < len(expected):
+            assert time.monotonic() < deadline, f"Transport stalled for test realm {realm_id}"
+            if not publish_one(connection, broker, issuer):
+                time.sleep(0.2)
+        broker.send({"event_id": poison_id, "event_type": "user.created"}, b"{")
+    finally:
+        broker.close()
+
+    compose("up", "-d", "--force-recreate", "--wait", "--wait-timeout", "180")
+
+    def receive(channel, deadline):
+        while time.monotonic() < deadline:
+            delivery, properties, body = channel.basic_get(QUEUE, auto_ack=False)
+            if delivery is not None:
+                return delivery, properties, body
+            time.sleep(0.2)
+        pytest.fail("Expected durable messages did not arrive")
+
+    with pika.BlockingConnection(
+        broker_parameters(amqp_url(broker_project, "agent-identity-consumer"))
+    ) as consumer:
+        channel = consumer.channel()
+        _, properties, _ = receive(channel, time.monotonic() + 15)
+        assert properties.message_id in expected
+        abandoned_id = properties.message_id
+        channel.close()
+        channel = consumer.channel()
+        received = {}
+        poison_rejected = False
+        deadline = time.monotonic() + 15
+        while len(received) < len(expected) or not poison_rejected:
+            delivery, properties, body = receive(channel, deadline)
+            if properties.message_id == poison_id:
+                assert not poison_rejected
+                with pytest.raises(EventContractError):
+                    decode_event(body, expected_issuer=issuer)
+                channel.basic_reject(delivery.delivery_tag, requeue=False)
+                poison_rejected = True
+                continue
+            event = decode_event(body, expected_issuer=issuer)
+            assert properties.message_id == event["event_id"]
+            assert properties.delivery_mode == 2
+            assert delivery.routing_key == event["event_type"]
+            assert event["event_id"] not in received
+            if event["event_id"] == abandoned_id:
+                assert delivery.redelivered
+            received[event["event_id"]] = event
+            channel.basic_ack(delivery.delivery_tag)
+        assert received == expected
+        assert channel.basic_get(QUEUE)[0] is None
+        with pytest.raises(pika.exceptions.ChannelClosedByBroker) as denied:
+            channel.basic_get("agent.identity.dead.v1")
+        assert denied.value.reply_code == 403
+
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        queues = json.loads(
+            compose(
+                "exec",
+                "-T",
+                "rabbitmq",
+                "rabbitmqctl",
+                "-q",
+                "list_queues",
+                "-p",
+                "identity",
+                "name",
+                "messages_ready",
+                "--formatter=json",
+            )
+        )
+        if any(q["name"] == "agent.identity.dead.v1" and q["messages_ready"] == 1 for q in queues):
+            return
+        time.sleep(0.5)
+    pytest.fail("Rejected poison message did not reach the restricted dead-letter queue")
