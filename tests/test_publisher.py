@@ -65,9 +65,8 @@ def broker_project(tmp_path):
         compose("down", "--volumes")
 
 
-@pytest.mark.runtime
-def test_confirm_retry_fencing_and_retention(runtime, broker_project):
-    compose, secrets = broker_project
+@pytest.fixture
+def publisher_database(runtime):
     target = runtime.command("port", "identity-postgres", "5432")
     assert target.returncode == 0
     host, port = target.stdout.strip().rsplit(":", 1)
@@ -85,15 +84,36 @@ def test_confirm_retry_fencing_and_retention(runtime, broker_project):
         "identity_bootstrap",
         "-d",
         "identity_test_db",
-        sql="CREATE ROLE identity_publisher LOGIN PASSWORD 'publisher-test-only-password';",
+        sql="""
+        DO $$ BEGIN
+          IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'identity_publisher') THEN
+            CREATE ROLE identity_publisher LOGIN PASSWORD 'publisher-test-only-password';
+          END IF;
+        END $$;
+        """,
     )
     assert bootstrap.returncode == 0, bootstrap.stderr
     assert runtime.sql((ROOT / "tools/grant_publisher.sql").read_text()).returncode == 0
+    with psycopg.connect(
+        database,
+        user="identity_publisher",
+        password="publisher-test-only-password",
+        autocommit=True,
+    ) as connection:
+        yield connection, database
 
-    def amqp_url(username):
-        address = compose("port", "rabbitmq", "5672")
-        password = quote((secrets / f"{username}.password").read_text().strip(), safe="")
-        return f"amqp://{username}:{password}@{address}/identity"
+
+def amqp_url(broker_project, username):
+    compose, secrets = broker_project
+    address = compose("port", "rabbitmq", "5672")
+    password = quote((secrets / f"{username}.password").read_text().strip(), safe="")
+    return f"amqp://{username}:{password}@{address}/identity"
+
+
+@pytest.mark.runtime
+def test_confirm_retry_fencing_and_retention(publisher_database, broker_project):
+    connection, database = publisher_database
+    compose, _ = broker_project
 
     def row_state(connection, event_id):
         return connection.execute(
@@ -126,20 +146,12 @@ def test_confirm_retry_fencing_and_retention(runtime, broker_project):
             (row_id, body),
         )
 
-    with (
-        psycopg.connect(
-            database,
-            user="identity_test",
-            password="identity-test-app-only-password",
-            autocommit=True,
-        ) as owner,
-        psycopg.connect(
-            database,
-            user="identity_publisher",
-            password="publisher-test-only-password",
-            autocommit=True,
-        ) as connection,
-    ):
+    with psycopg.connect(
+        database,
+        user="identity_test",
+        password="identity-test-app-only-password",
+        autocommit=True,
+    ) as owner:
         seed(owner, event_id)
         try:
             with pytest.raises(psycopg.errors.InsufficientPrivilege):
@@ -149,7 +161,9 @@ def test_confirm_retry_fencing_and_retention(runtime, broker_project):
                     "DELETE FROM dl_identity_outbox WHERE event_id = %s", (event_id,)
                 )
 
-            broker = RabbitPublisher(broker_parameters(amqp_url("identity-publisher")))
+            broker = RabbitPublisher(
+                broker_parameters(amqp_url(broker_project, "identity-publisher"))
+            )
             compose("stop", "rabbitmq")
             with pytest.raises(AMQP_ERRORS):
                 publish_one(connection, broker, ISSUER)
@@ -159,7 +173,9 @@ def test_confirm_retry_fencing_and_retention(runtime, broker_project):
                 "UPDATE dl_identity_outbox SET claim_until = now() WHERE event_id = %s", (event_id,)
             )
             compose("up", "-d", "--wait", "--wait-timeout", "180")
-            broker = RabbitPublisher(broker_parameters(amqp_url("identity-publisher")))
+            broker = RabbitPublisher(
+                broker_parameters(amqp_url(broker_project, "identity-publisher"))
+            )
 
             class LostClaim:
                 def send(self, event, payload):
@@ -180,7 +196,7 @@ def test_confirm_retry_fencing_and_retention(runtime, broker_project):
                 broker.close()
 
             with pika.BlockingConnection(
-                broker_parameters(amqp_url("agent-identity-consumer"))
+                broker_parameters(amqp_url(broker_project, "agent-identity-consumer"))
             ) as consumer:
                 channel = consumer.channel()
                 for _ in range(2):
