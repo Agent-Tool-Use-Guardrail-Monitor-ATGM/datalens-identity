@@ -16,6 +16,7 @@ jobs:
     env:
       IDENTITY_DATABASE_TESTS: "1"
       IDENTITY_RUNTIME_TESTS: "1"
+      IDENTITY_MESSAGING_ROOT: test-results/messaging
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -25,6 +26,13 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.12"
+      - name: Check out verified messaging topology
+        uses: actions/checkout@v7
+        with:
+          repository: Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-messaging
+          ref: 25b2afabeff049834355c19add7061d557639120
+          path: test-results/messaging
+          persist-credentials: false
       - name: Install test tooling
         run: python -m pip install -r requirements.txt
       - name: Install pinned Chromium

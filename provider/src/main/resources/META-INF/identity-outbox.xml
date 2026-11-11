@@ -20,4 +20,31 @@
   <sql>ALTER TABLE dl_identity_outbox ADD CONSTRAINT dl_identity_outbox_size CHECK (octet_length(payload) &lt;= 16384)</sql>
   <createIndex tableName="dl_identity_outbox" indexName="dl_identity_outbox_created"><column name="created_at_ms"/><column name="event_id"/></createIndex>
  </changeSet>
+ <changeSet id="identity-outbox-002" author="datalens">
+  <sql>
+   ALTER TABLE dl_identity_outbox
+    ADD COLUMN claim_token uuid,
+    ADD COLUMN claim_until timestamptz,
+    ADD COLUMN published_at timestamptz;
+   CREATE INDEX dl_identity_outbox_pending ON dl_identity_outbox (created_at_ms, event_id)
+    WHERE published_at IS NULL;
+   CREATE INDEX dl_identity_outbox_published ON dl_identity_outbox (published_at, event_id)
+    WHERE published_at IS NOT NULL;
+  </sql>
+  <sql splitStatements="false">
+   CREATE FUNCTION public.dl_identity_purge_published() RETURNS bigint
+   LANGUAGE sql SECURITY DEFINER SET search_path = pg_catalog AS $$
+    WITH expired AS (
+     SELECT event_id FROM public.dl_identity_outbox
+      WHERE published_at &lt; now() - interval '7 days'
+      ORDER BY published_at, event_id LIMIT 1000 FOR UPDATE SKIP LOCKED
+    ), deleted AS (
+     DELETE FROM public.dl_identity_outbox AS outbox USING expired
+      WHERE outbox.event_id = expired.event_id RETURNING 1
+    )
+    SELECT count(*) FROM deleted
+   $$;
+  </sql>
+  <sql>REVOKE ALL ON FUNCTION public.dl_identity_purge_published() FROM PUBLIC</sql>
+ </changeSet>
 </databaseChangeLog>

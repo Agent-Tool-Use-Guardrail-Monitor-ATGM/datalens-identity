@@ -1,5 +1,9 @@
 # Add to the matching database Compose file; PostgreSQL storage remains unchanged.
 services:
+  identity-postgres:
+    ports:
+      - "127.0.0.1:0:5432"
+
   identity-keycloak:
     build:
       context: .
