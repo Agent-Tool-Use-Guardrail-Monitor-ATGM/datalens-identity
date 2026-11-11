@@ -1,6 +1,6 @@
 # Identity integration: plan 3.8.4
 
-Updated 11 November 2026. Current branch: `fix/identity-security-events`.
+Updated 11 November 2026. Current branch: `fix/password-session-revocation`.
 Implement one slice, verify it and stop before the next.
 
 **Broker ownership revision, 10 November 2026:** RabbitMQ deployment, persistent
@@ -27,10 +27,10 @@ earlier `identity-rabbitmq` planning name. This changes repository ownership onl
      account/outbox rollback with honest HTTP failure on validation/storage errors.
      Existing self-registration handling is not acceptance-tested; onboarding
      remains administrator-created accounts with public registration disabled.
-   - **3.8.4.3.2 Security mappings (implemented, PR gate pending):** independent security revisions,
+   - **3.8.4.3.2 Security mappings (merged, Linux verified):** independent security revisions,
      session/user revocation, enable/disable, deletion and role changes, including
      administrative paths. Prove ordering, rollback and cutoff semantics.
-   - **3.8.4.3.3 Password enforcement (not started):** invalidate other sessions
+   - **3.8.4.3.3 Password enforcement (PR gate pending):** invalidate other sessions
      even when the native checkbox is unchecked. Canonical password
      `UPDATE_CREDENTIAL` and its deprecated event must produce one logical change.
      Verify actual refresh invalidation for native changes and admin resets.
@@ -69,6 +69,8 @@ and merged in [PR #12](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/
 | Administrator adds or removes a user's direct realm or client role mapping | `user.sessions.revoked`, reason `roles_changed` |
 | Administrator changes the enabled state | `user.disabled` or `user.enabled`, alongside the existing profile snapshot |
 | Administrator deletes the user | `user.deleted` |
+| User successfully changes their password through Keycloak's required action | `user.sessions.revoked`, reason `password_changed` |
+| Administrator successfully calls the user's `reset-password` endpoint | `user.sessions.revoked`, reason `admin_password_reset` |
 
 Keycloak's administrator session-delete event carries the session ID after the
 session is gone. A request filter captures its owner before removal. The
@@ -83,8 +85,8 @@ Cutoffs use the same clock as Keycloak token issuance, rounded down to Unix
 seconds. Direct role mapping events request rejection of older access tokens by
 the future agent consumer. Keycloak refresh sessions remain active on role
 changes. Group membership changes, edits to composite role definitions and
-realm-wide logout are outside these per-user mappings. Password changes and
-resets belong to 3.8.4.3.3. The provider remains in the disposable test image.
+realm-wide logout are outside these per-user mappings. The provider remains in
+the disposable test image.
 
 Pinned sources: [user operations](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/resources/admin/UserResource.java),
 [admin session deletion](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/resources/admin/RealmAdminResource.java),
@@ -105,10 +107,36 @@ final full run, the browser test passed with that assertion. The full run
 stopped at **165 passed and one failure** after the outbox test timed out on
 realm teardown. Its event, rollback, concurrency and restart assertions
 finished before teardown. Five later tests did not run. This matches the prior
-local teardown symptom, with no JVM cause confirmed on this run. Required
-Linux PR CI is pending. Disposable test containers were removed.
+local teardown symptom, with no JVM cause confirmed on that run. Disposable
+test containers were removed.
 
-The next step after verified PR delivery is 3.8.4.3.3 password enforcement.
+The required [Linux job](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/actions/runs/43054685496)
+passed all 171 tests and [PR #14](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/pull/14)
+merged as `e97bbf9`.
+
+## Password enforcement
+
+The successful password `UPDATE_CREDENTIAL` event supplies the authentication
+root ID that Keycloak uses for the current session. The listener keeps that
+session and removes the user's other online and offline sessions through
+Keycloak's session provider. The administrator reset endpoint removes all of
+the target user's sessions. Both write one user-wide outbox event and reuse the
+transactional security revision and cutoff. Keycloak can also emit individual
+logout events when the checkbox is selected. The deprecated `UPDATE_PASSWORD`
+event adds no second password revocation.
+
+This covers Keycloak's password required action and dedicated admin reset
+endpoint. Inline credential writes through generic user updates and third-party
+credential providers are outside this mapping. For changes covered here, old
+access tokens remain subject to the future agent consumer's inclusive cutoff.
+The mandatory session removals do not invoke client back-channel callbacks.
+
+The disposable provider built successfully. All 149 unit tests and both
+focused browser/PostgreSQL tests passed. The focused cases verify both checkbox
+settings, the existing browser session, rejected administrator resets, rollback
+of the password and retained refresh session on write failure, refresh rejection
+after success and consecutive outbox revisions. Offline token issuance and
+revocation were outside this runtime check. Full Linux PR CI is pending.
 
 ## Wire contract
 

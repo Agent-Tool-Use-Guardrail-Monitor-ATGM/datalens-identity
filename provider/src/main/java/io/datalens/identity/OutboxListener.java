@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.keycloak.common.util.Time;
 import org.keycloak.connections.jpa.JpaConnectionProvider;
+import org.keycloak.credential.CredentialModel;
 import org.keycloak.events.Details;
 import org.keycloak.events.Event;
 import org.keycloak.events.EventType;
@@ -21,6 +22,7 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.AbstractKeycloakTransaction;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
+import org.keycloak.models.UserSessionModel;
 import org.keycloak.urls.UrlType;
 
 /** Identity event capture for the disposable Keycloak image. */
@@ -37,6 +39,12 @@ public class OutboxListener implements EventListenerProvider {
             record(event.getRealmId(), event.getUserId(), "user.created");
         } else if (event.getType() == EventType.UPDATE_PROFILE) {
             record(event.getRealmId(), event.getUserId(), "user.profile.updated");
+        } else if (event.getType() == EventType.UPDATE_CREDENTIAL && event.getDetails() != null
+                && CredentialModel.PASSWORD.equals(event.getDetails().get(Details.CREDENTIAL_TYPE))) {
+            // Keycloak uses this authentication root ID to preserve the session changing its password.
+            String currentSession = event.getDetails().get(Details.CODE_ID);
+            if (currentSession == null || currentSession.isBlank()) throw failTransaction();
+            revokePasswordSessions(event.getRealmId(), event.getUserId(), currentSession, "password_changed");
         } else if (event.getType() == EventType.LOGOUT
                 && event.getUserId() != null && event.getSessionId() != null) {
             record(event.getRealmId(), event.getUserId(), "user.session.revoked",
@@ -80,13 +88,41 @@ public class OutboxListener implements EventListenerProvider {
                 record(realmId, subject, "user.deleted", Map.of());
             }
         } else if (resource == ResourceType.USER && operation == OperationType.ACTION
-                && path.length == 3 && path[2].equals("logout")) {
-            record(realmId, subject, "user.sessions.revoked", Map.of("reason", "logout_all"));
+                && path.length == 3) {
+            if (path[2].equals("logout")) {
+                record(realmId, subject, "user.sessions.revoked", Map.of("reason", "logout_all"));
+            } else if (path[2].equals("reset-password")) {
+                revokePasswordSessions(realmId, subject, null, "admin_password_reset");
+            }
         } else if ((operation == OperationType.CREATE || operation == OperationType.DELETE)
                 && path.length >= 4 && path[2].equals("role-mappings")
                 && ((resource == ResourceType.REALM_ROLE_MAPPING && path.length == 4 && path[3].equals("realm"))
                 || (resource == ResourceType.CLIENT_ROLE_MAPPING && path.length == 5 && path[3].equals("clients")))) {
             record(realmId, subject, "user.sessions.revoked", Map.of("reason", "roles_changed"));
+        }
+    }
+
+    private void revokePasswordSessions(String realmId, String subject, String currentSession, String reason) {
+        if (subject == null || subject.isBlank()) throw failTransaction();
+        record(realmId, subject, "user.sessions.revoked", Map.of("reason", reason));
+        try {
+            RealmModel realm = session.realms().getRealm(realmId);
+            UserModel user = session.users().getUserById(realm, subject);
+            if (user == null) throw new IllegalStateException("Missing password change subject");
+            var sessions = session.sessions();
+            // Snapshot sessions before removing them from the provider.
+            sessions.getUserSessionsStream(realm, user)
+                    .filter(active -> !active.getId().equals(currentSession))
+                    .toList().forEach(active -> sessions.removeUserSession(realm, active));
+            sessions.getOfflineUserSessionsStream(realm, user)
+                    .filter(offline -> !offline.getId().equals(currentSession)
+                            && (currentSession == null || !currentSession.equals(
+                                    offline.getNote(UserSessionModel.CORRESPONDING_SESSION_ID))))
+                    .toList().forEach(offline -> sessions.removeOfflineUserSession(realm, offline));
+            session.authenticationSessions().removeRootAuthenticationSessionsByAuthenticatedUser(
+                    realm, user, currentSession);
+        } catch (Exception failure) {
+            throw failTransaction();
         }
     }
 

@@ -74,20 +74,15 @@ requires the future identity-event pipeline, not this client setup.
 
 ## Password changes and revocation: important boundary
 
-On pinned Keycloak 26.8.1, the password form's **Sign out from other devices**
-checkbox is initially unchecked. Checking it ends other identity sessions;
-without it, changing a password does not guarantee their refresh tokens stop.
-For this intermediate stage, explicitly check it when changing a password.
-Administrator logout-all also ends refresh sessions. Already issued JWTs are
-not erased from other services; they expire or require local revocation state.
+The disposable 3.8.4.3.3 provider ends other Keycloak refresh sessions after
+a successful password change, regardless of the **Sign out from other devices**
+checkbox. The current browser session remains active. An administrator reset
+through the dedicated endpoint ends all refresh sessions for the target user.
+See [password enforcement](identity-event-integration.md#password-enforcement).
 
-Before production, step **3.8.4 must enforce password-change logout of other
-sessions regardless of the checkbox**, and durably publish its revocation event.
-RabbitMQ alone cannot invalidate a still-active Keycloak refresh session.
-Use the canonical `UPDATE_CREDENTIAL` event with password credential detail;
-the deprecated password event must not produce a second logical change. Verify
-both checked and unchecked password flows with the implemented enforcement.
-Do not claim automatic password revocation is delivered by step 3.8.3.
+For realms where the provider is still pending activation, select the checkbox
+to end other sessions. Already issued access tokens expire or require
+revocation at the receiving service.
 
 Later RabbitMQ consumers reject new requests quickly after consumed revocation;
 300-second access-token expiry bounds delayed unknown revocations. Accepted
