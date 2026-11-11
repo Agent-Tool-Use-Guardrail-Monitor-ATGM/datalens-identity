@@ -21,7 +21,7 @@ earlier `identity-rabbitmq` planning name. This changes repository ownership onl
    Security allocation is verified with the mappings in 3.8.4.3. Do not substitute
    in-memory or after-commit-only sending for atomic durable intent.
 3. **3.8.4.3 Mappings/enforcement**, divided into these sequential slices:
-   - **3.8.4.3.1 Profile mappings (blocked: runtime verification):** canonical full snapshots for
+   - **3.8.4.3.1 Profile mappings (complete; Linux verified and merged):** canonical full snapshots for
      administrator creation/updates and native Account Console profile edits.
      Verify stable subject, consecutive revisions, explicit null clearing and
      account/outbox rollback with honest HTTP failure on validation/storage errors.
@@ -63,31 +63,33 @@ the earlier contract-only stage, not final source-proof regression.
 ## Current profile-slice verification
 
 **Current, 11 November 2026: 3.8.4.3.1 native profile mappings.**
-**Status: Blocked ? final runtime verification.** Identity branch:
-`fix/identity-profile-events`. Administrator/native profile snapshots, null
-clearing and transactional rollback protection are implemented in the disposable
-test image. The configuration CLI also has bounded administrator-token renewal,
-serialized rotation and an IPv4 transport for local Compose URLs; hosted URLs and
-agent authentication are unchanged.
+**Status: Complete ? Linux verified; implementation delivered.**
+[Identity PR #12](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/pull/12)
+merged as `3c69795`. Implementation commit `81e9754` passed required Linux
+[`tests`](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/actions/runs/42988281357):
+**171 passed in 341.56 seconds**, including real browser, PostgreSQL, transactional
+failure/concurrency, administrator renewal and realm cleanup checks.
 
-Final unit gate: **149 passed, 22 runtime/PostgreSQL tests deselected, 0.50 seconds**.
-Fifteen new administration-client tests pass. Ruff lint, changed-file formatting,
-dependency and whitespace checks pass. Latest fresh full gate after Docker reset:
-**114 passed, 1 failed, 172.46 seconds**, stopping on realm cleanup after profile
-assertions passed. This is not a successful full gate or merge sign-off.
-Prior JVM samples found realm deletion/session cleanup spinning in Hibernate's
-SimpleTimestamper; a timestamp-only probe observed guest-clock rollback. Increasing
-cleanup timeouts and forcing IPv4 did not resolve that stall. Original cleanup
-limits remain; no cache/JIT/transaction assertion is bypassed. Disposable test
-containers are stopped and ignored reports retain the failed-run evidence.
+Native Account Console edits now share canonical profile snapshots, null clearing
+and transactional revision/outbox writes with administrator changes. A request-local
+response guard prevents false HTTP success after listener rollback. The explicit
+administration CLI supports bounded, serialized refresh-token renewal and local
+IPv4 transport without changing hosted URLs or agent authentication. Provider
+packaging/activation remains limited to the disposable test image.
 
-Next action is stable-clock local verification or a draft PR's Linux `tests` gate;
-do not merge or implement 3.8.4.3.2 security mappings until verification passes.
-3.8.4.3.3 password enforcement and RabbitMQ publishing/consumption remain later.
-The user authorized this fix branch's commit/push and a draft PR for Linux CI.
-No merge, production activation or cloud deployment is authorized.
-Parent plans are outside service Git repositories and their PRs. Older progress
-snapshots below are historical.
+Local unit gate: **149 passed, 22 runtime/PostgreSQL tests deselected**. Ruff,
+changed-file formatting, dependency and whitespace checks pass. Windows/Docker
+full verification still encountered realm cleanup spinning in Hibernate's
+SimpleTimestamper; a timestamp-only probe observed guest-clock rollback. Failed
+local runs remain documented, not counted as passes. Linux CI completed the same
+suite with original cleanup limits and no cache/JIT/transaction bypass.
+Disposable local containers are stopped; no production realm or cloud changed.
+
+Stop before 3.8.4.3.2 security mappings. 3.8.4.3.3 password enforcement and RabbitMQ
+publishing/consumption remain later. Verification-record updates use a separate
+docs-only branch/PR; no agent-issued merge is authorized. Parent planning files
+remain outside service Git repositories and PRs. Older progress snapshots below
+are historical.
 
 ## Wire contract
 
