@@ -127,3 +127,120 @@ Primary sources:
 - [Pinned transaction preparation/commit implementation](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/DefaultKeycloakTransactionManager.java)
 - [Pinned administrator event exception handling](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/resources/admin/AdminEventBuilder.java)
 - [JPA provider deprecation](https://github.com/keycloak/keycloak/blob/26.8.1/model/jpa/src/main/java/org/keycloak/connections/jpa/entityprovider/JpaEntityProvider.java)
+
+## 3.8.4.3.1 extension: native profile changes
+
+The next profile slice, on `fix/identity-profile-events`, adds successful native
+`UPDATE_PROFILE` events to the same canonical snapshot writer. Administrative
+creation/update behavior is retained. Email, username and display-name edits
+keep the stable subject and increment only the profile counter. Null snapshots
+explicitly clear optional display fields; no credentials or authoritative roles
+are copied. The native Account Console does not emit a second deprecated email
+event through this mapping.
+
+Native account endpoints defer transaction closing until a response filter runs.
+A rollback-only transaction can therefore return HTTP 204 even though the write
+was rolled back. `OutboxFailureFilter` detects only the listener's request-local
+failure marker and replaces that response with a generic, non-cacheable HTTP 500
+before Keycloak's priority-1 session closer. It also preserves rollback-only.
+The existing failing prepare participant remains necessary for administrative
+paths that explicitly commit before building their response. Neither guard makes
+broker calls or logs account payloads. Unmarked responses are unchanged.
+
+The expanded native browser acceptance covers full username/name/email snapshots,
+combined-name validation failure, an immediate outbox storage failure, unchanged
+account/event state after rejection, successful retry without a revision gap,
+explicit clearing, and absence of fabricated profile events from credential,
+login, token or client operations. The administration tool renews rejected access tokens once through the master
+realm refresh grant; this does not refresh the end user's tokens or change
+the product's lifetimes. Self-registration remains disabled and is not covered.
+
+Custom JAX-RS filters, like the JPA extension, depend on unsupported Keycloak
+extension behavior. This guard is pinned to 26.8.1 and must be reverified with
+transaction-response assertions before upgrades. Production packaging and realm
+activation remain deferred until complete source/security acceptance. Security
+mappings and mandatory password-session enforcement are not delivered here.
+
+Relevant pinned source paths:
+
+- [Native account profile endpoint](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/resources/account/AccountRestService.java)
+- [User-event listener exception handling](https://github.com/keycloak/keycloak/blob/26.8.1/server-spi-private/src/main/java/org/keycloak/events/EventBuilder.java)
+- [Session transaction closure](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/DefaultKeycloakSession.java)
+- [Priority-1 session response filter](https://github.com/keycloak/keycloak/blob/26.8.1/quarkus/runtime/src/main/java/org/keycloak/quarkus/runtime/integration/jaxrs/CloseSessionFilter.java)
+
+### Verification prerequisites in the profile slice
+
+The first fresh full gate on 11 November had 152 passes and four failures:
+email activation/setup returned administrator HTTP 401, while native profile and
+transaction assertions passed but their fresh cleanup clients hit 15-second
+realm-deletion deadlines. This failed report is retained locally as
+`test-results/profile-events-full-failed.xml`; it is not accepted verification.
+
+`Admin` is the explicit configuration/test CLI client, not an agent runtime
+component. It now holds its administrator refresh token only in process memory.
+After an unexpected HTTP 401 it renews through Keycloak once and replays that
+unauthenticated request once. Concurrent rejections share a lock and reuse the
+renewed token; rotated refresh tokens replace old values. Invalid/denied renewal
+fails closed without password-login fallback. HTTP 403, 5xx and transport failures
+are not replayed. Closing the client clears token references and the bearer header.
+Fifteen unit tests cover renewal, rotation, concurrency, rejection, malformed
+responses, absence of unsafe retries and local/hosted transport boundaries. Transaction acceptance also forces an
+invalid synthetic access header and verifies real Keycloak refresh recovery.
+There is no new agent token storage, login service or per-request identity call.
+
+The two source tests set 60 seconds for administrator account operations, but
+previously recreated cleanup clients with the helper's 15-second default. A diagnostic
+60-second cleanup budget also failed, so that change was discarded and the
+original 15-second cleanup deadline is retained. Isolated measured deletion
+completed within four seconds; longer waits do not solve the runtime stall. No database blockers were observed during the full-run inspection.
+No general application/database timeout, user JWT lifetime or fault assertion
+was weakened, and cleanup failure still fails the test.
+
+### Runtime clock investigation, 11 November 2026
+
+The renewal-only full rerun stopped with 112 passes and one realm-cleanup timeout
+(572.72 seconds); a subsequent IPv4-focused run also passed its functional profile
+assertions but timed out deleting the realm. Neither is a successful gate.
+
+`localhost` health requests measured 2.06?2.13 seconds, versus 0.03 seconds through
+IPv4. The local administration transport now uses IPv4 for `localhost` because
+Compose publishes IPv4 loopback ports. Canonical URLs/issuer strings are unchanged;
+hosted names keep the standard transport. This removes a measured local connection
+penalty, but did not solve the separate server-side stall.
+
+A JVM thread sample captured both realm deletion and session expiration actively
+spinning at `org.hibernate.cache.spi.support.SimpleTimestamper.next`, line 35.
+The deletion stack passed through `JpaUserProvider.preRemove` and
+`RealmAdminResource.deleteRealm`; PostgreSQL showed no blocked queries. The
+installed dependency is Hibernate 7.4.9.Final. Offline bytecode inspection showed
+its wall-clock-based timestamp/CAS loop. A temporary read-only timestamp probe
+observed two backwards wall-clock samples in ten seconds. This is consistent
+with the upstream clock-related spin report, not proof of a database deadlock.
+The probe read only the cache timestamp counter, never account or token data.
+Its artifacts remain ignored under `test-results/`; the disposable JVM containing
+the probe was removed. No agent JAR is added to an application image.
+
+Only the three disposable identity containers were running before the Docker
+Desktop reset. No development volumes or external services were stopped.
+Verification must pass after the environment reset; no cache/JIT bypass, vendor
+library patch, swallowed cleanup error or relaxed transaction assertion is used.
+
+Primary context: [upstream HHH-13664 discussion in Hibernate's issue archive](https://lists.jboss.org/archives/list/hibernate-issues%40lists.jboss.org/2023/3/?count=200&page=6).
+
+### Latest gate and stop condition
+
+After the Docker reset, the fresh fail-fast full gate had **114 passes and one
+failure in 172.46 seconds**, at the native profile test's realm-deletion cleanup.
+All profile assertions passed, but cleanup still failed. The existing 15-second
+cleanup deadline is unchanged. Full regression is therefore **blocked**, not
+complete. Report: ignored `test-results/profile-events-full-after-reset.xml`.
+The final unit-only gate passed **149 tests, 22 deselected, in 0.50 seconds**;
+Ruff, changed-file formatting, dependency and whitespace checks passed.
+
+The disposable stack was stopped. No diagnostic agent remains in a running JVM
+or application image. Failed reports/diagnostic artifacts are ignored and must
+not be committed. Next verification requires a stable local clock or the Linux
+CI `tests` job on a draft PR. Do not merge, claim production readiness or implement
+security mappings while this gate remains unresolved. The user subsequently
+authorized committing/pushing this branch and opening a draft PR for Linux CI,
+without merging. Parent planning updates are outside this repository and PR.

@@ -4,15 +4,18 @@ import base64
 import hashlib
 import json
 import secrets
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Thread
 from urllib.parse import parse_qs, urlencode, urlparse
+from uuid import UUID
 
 import httpx
 import pytest
 from bootstrap_identity import Admin, SetupError, create_realm
 from configure_frontend import CLIENT, configure
 from configure_oidc import configure as configure_api
+from identity_events import decode_event
 from playwright.sync_api import expect, sync_playwright
 from test_runtime import runtime as runtime
 
@@ -59,6 +62,22 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
     admin.client.timeout = httpx.Timeout(60)
     try:
         create_realm(admin, realm)
+        realm_id = str(UUID(admin.request("GET", realm).json()["id"]))
+        admin.request("PUT", realm, {"eventsListeners": ["identity-outbox-proof"]})
+
+        def profiles():
+            rows = runtime.value(
+                f"SELECT payload FROM dl_identity_outbox WHERE realm_id = '{realm_id}';"
+            )
+            events = [
+                decode_event(row.encode(), expected_issuer=origin + "/realms/" + realm)
+                for row in rows.splitlines()
+            ]
+            return sorted(
+                (e for e in events if e["event_type"] in {"user.created", "user.profile.updated"}),
+                key=lambda e: e["data"]["profile_revision"],
+            )
+
         api_id = configure_api(admin, realm, frontend)
         legacy = admin.request("GET", f"{realm}/clients/{api_id}").json()
         secret = admin.request("GET", f"{realm}/clients/{api_id}/client-secret").json()["value"]
@@ -85,6 +104,9 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
         user_id = admin.request("GET", realm + "/users?username=analyst&exact=true").json()[0]["id"]
         role = admin.request("GET", f"{realm}/clients/{api_id}/roles/admin").json()
         admin.request("POST", f"{realm}/users/{user_id}/role-mappings/clients/{api_id}", [role])
+        assert len(profiles()) == 1
+        assert profiles()[0]["event_type"] == "user.created"
+        assert profiles()[0]["data"]["profile_revision"] == 1
         issuer = origin + "/realms/" + realm
         endpoint, callback = issuer + "/protocol/openid-connect", frontend + "/auth/callback"
         proof = secrets.token_urlsafe(48)
@@ -149,7 +171,7 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                     },
                 )
 
-            first, second = browser.new_context(), browser.new_context()
+            first, second, profile_context = (browser.new_context() for _ in range(3))
             try:
                 page, code = login(first)
                 response = exchange(code)
@@ -195,6 +217,37 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                     == "renamed-analyst"
                 )
                 assert page.locator('input[type="file"], input[name="picture"]').count() == 0
+                snapshots = profiles()
+                assert len(snapshots) == 2 and snapshots[-1]["subject"] == user_id
+                assert snapshots[-1]["event_type"] == "user.profile.updated"
+                assert snapshots[-1]["data"] == {
+                    "profile_revision": 2,
+                    "display_name": "Test Analyst",
+                    "username": "renamed-analyst",
+                    "email": "analyst@example.invalid",
+                }
+                page.locator("#firstName").fill("a" * 200)
+                page.locator("#lastName").fill("b" * 200)
+                with page.expect_response(
+                    lambda r: r.request.method == "POST" and "/account/" in r.url
+                ) as rejected:
+                    page.get_by_test_id("save").click()
+                assert rejected.value.status == 500
+                assert rejected.value.json() == {"error": "identity_event_persistence_failed"}
+                assert "no-store" in rejected.value.headers.get("cache-control", "")
+                assert len(profiles()) == 2
+                unchanged = admin.request("GET", f"{realm}/users/{user_id}").json()
+                assert unchanged["firstName"] == "Test" and unchanged["lastName"] == "Analyst"
+                page.reload()
+                page.locator("#firstName").fill("Updated")
+                page.locator("#lastName").fill("Analyst")
+                with page.expect_response(
+                    lambda r: r.request.method == "POST" and "/account/" in r.url
+                ) as renamed:
+                    page.get_by_test_id("save").click()
+                assert renamed.value.status in (200, 204)
+                assert profiles()[-1]["data"]["display_name"] == "Updated Analyst"
+                assert len(profiles()) == 3
                 updated = refresh(first_tokens["refresh_token"])
                 assert updated.status_code == 200
                 assert (
@@ -294,6 +347,70 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                     },
                 )
                 assert bad.headers.get("access-control-allow-origin") is None
+                # Credential/login/token/client operations must not fabricate profile updates.
+                assert len(profiles()) == 3
+                email_page, _ = login(
+                    profile_context, "renamed-analyst", "Updated-Test!29" + password
+                )
+                email_page.goto(issuer + "/account/")
+                email_page.locator("#email").fill("changed@example.invalid")
+                assert (
+                    runtime.sql(
+                        "ALTER TABLE dl_identity_outbox ADD CONSTRAINT dl_native_reject "
+                        "CHECK(false) NOT VALID;"
+                    ).returncode
+                    == 0
+                )
+                try:
+                    with email_page.expect_response(
+                        lambda r: r.request.method == "POST" and "/account/" in r.url
+                    ) as unavailable:
+                        email_page.get_by_test_id("save").click()
+                    assert unavailable.value.status == 500
+                    assert unavailable.value.json() == {
+                        "error": "identity_event_persistence_failed"
+                    }
+                finally:
+                    assert (
+                        runtime.sql(
+                            "ALTER TABLE dl_identity_outbox DROP CONSTRAINT dl_native_reject;"
+                        ).returncode
+                        == 0
+                    )
+                assert len(profiles()) == 3
+                assert admin.request("GET", f"{realm}/users/{user_id}").json()["email"] == (
+                    "analyst@example.invalid"
+                )
+                email_page.reload()
+                email_page.locator("#email").fill("changed@example.invalid")
+                with email_page.expect_response(
+                    lambda r: r.request.method == "POST" and "/account/" in r.url
+                ) as email_saved:
+                    email_page.get_by_test_id("save").click()
+                assert email_saved.value.status in (200, 204)
+                assert profiles()[-1]["data"] == {
+                    "profile_revision": 4,
+                    "display_name": "Updated Analyst",
+                    "username": "renamed-analyst",
+                    "email": "changed@example.invalid",
+                }
+                assert len(profiles()) == 4
+                admin.request(
+                    "PUT",
+                    f"{realm}/users/{user_id}",
+                    {
+                        "firstName": "",
+                        "lastName": "",
+                        "email": "",
+                    },
+                )
+                assert profiles()[-1]["data"] == {
+                    "profile_revision": 5,
+                    "display_name": None,
+                    "username": "renamed-analyst",
+                    "email": None,
+                }
+                assert len(profiles()) == 5
                 admin.request(
                     "PUT", f"{realm}/clients/{web_id}", {"redirectUris": [frontend + "/drift"]}
                 )
@@ -302,14 +419,20 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
             finally:
                 first.close()
                 second.close()
+                profile_context.close()
                 browser.close()
                 server.shutdown()
                 server.server_close()
                 thread.join()
     finally:
+        original = sys.exception()
         admin.close()
         cleanup = Admin(origin, admin_name, password)
         try:
             cleanup.request("DELETE", realm, expected=(204, 404))
+        except Exception as cleanup_failure:
+            if original is not None:
+                raise original from cleanup_failure
+            raise
         finally:
             cleanup.close()
