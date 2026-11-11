@@ -6,24 +6,28 @@ Python is configuration/test tooling; there is no custom authentication API.
 
 ## Current progress
 
-**11 November 2026 - 3.8.4.3.2 security mappings**
+**11 November 2026 - 3.8.4.3.3 password enforcement**
 
-Implemented on `fix/identity-security-events`. Keycloak records session
-logout, direct role changes, account enable/disable and deletion in its
-transactional outbox. Security revisions are independent of profile revisions.
-The provider remains limited to the disposable test image.
-See [identity event sources](docs/identity-event-integration.md#security-event-sources).
+Implemented on `fix/password-session-revocation`. Keycloak password changes
+end other sessions with either checkbox setting and keep the current session.
+The dedicated administrator reset endpoint ends all sessions for the target
+user. Each successful change adds one user-wide revocation to the outbox.
 
-The provider builds. All 149 unit tests passed. The two focused runtime tests
-passed before the extra admin-session rollback assertion was added. In the
-final full run, the browser test passed with that assertion. The full run
-stopped at **165 passed and one failure** after the outbox test timed out on
-realm teardown. Its event, rollback, concurrency and restart assertions
-finished before teardown. Five later tests did not run. This matches the prior
-local teardown symptom, with no JVM cause confirmed on this run. Required
-Linux PR CI is pending. Disposable test containers were removed.
+The provider builds. **149 unit tests and two focused runtime tests passed.**
+The browser and PostgreSQL checks cover refresh rejection, current-session
+preservation, outbox rollback and consecutive revisions. Earlier browser
+attempts reused a token chain after replay and attempted fresh login after
+clearing profile fields. The final test uses a fresh token chain and verifies
+the reset before clearing fields. The earlier realm cleanup timeout remains
+recorded. The full Linux PR gate is pending. Offline sessions are covered by
+the provider's removal path and were not exercised by an offline token test.
 
-The next step after verified PR delivery is 3.8.4.3.3 password enforcement.
+This slice uses the disposable Keycloak image. The next step after verified PR
+delivery is 3.8.4.4.1 broker foundation.
+
+[Identity password enforcement](docs/identity-event-integration.md#password-enforcement).
+
+**Previous milestone: 3.8.4.3.2 security mappings.** [PR #14](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/pull/14) merged as `e97bbf9` after 171 Linux tests passed.
 
 Previous milestone: native profile mappings passed 171 Linux tests and merged
 in [PR #12](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/pull/12).

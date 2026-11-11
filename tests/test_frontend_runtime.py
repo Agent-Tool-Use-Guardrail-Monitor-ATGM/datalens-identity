@@ -265,17 +265,49 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                     == "renamed-analyst"
                 )
                 assert refresh(first_tokens["refresh_token"]).status_code == 400
-                first_tokens = updated.json()
-                page.goto(issuer + "/account/account-security/signing-in")
-                page.locator('[data-testrole="update"]').click()
-                page.locator("#password-new").fill("Updated-Test!29" + password)
-                page.locator("#password-confirm").fill("Updated-Test!29" + password)
-                checkbox = page.locator('input[name="logout-sessions"]')
-                expect(checkbox).not_to_be_checked()
-                checkbox.check()
-                page.locator("#kc-submit").click()
-                page.wait_for_url(lambda url: "/account/" in url)
-                assert refresh(second_tokens["refresh_token"]).status_code == 400
+                # Start a fresh token chain after the deliberate replay, using the same SSO session.
+                page.goto(endpoint + "/auth?" + urlencode(parameters | {"prompt": "none"}))
+                page.wait_for_url(lambda url: url.startswith(callback + "?"))
+                sso_code = parse_qs(urlparse(page.url).query)["code"][0]
+                first_tokens = exchange(sso_code).json()
+                assert payload(first_tokens["access_token"])["sid"] == claims["sid"]
+                for index, checked in enumerate((False, True), start=1):
+                    current_password = f"Updated-{index}!29" + password
+                    before_change = security_events()[-1]["data"]["security_revision"]
+                    page.goto(issuer + "/account/account-security/signing-in")
+                    page.locator('[data-testrole="update"]').click()
+                    page.locator("#password-new").fill(current_password)
+                    page.locator("#password-confirm").fill(current_password)
+                    checkbox = page.locator('input[name="logout-sessions"]')
+                    expect(checkbox).not_to_be_checked()
+                    if checked:
+                        checkbox.check()
+                    page.locator("#kc-submit").click()
+                    page.wait_for_url(lambda url: "/account/" in url)
+                    assert refresh(second_tokens["refresh_token"]).status_code == 400
+                    current_refresh = refresh(first_tokens["refresh_token"])
+                    assert current_refresh.status_code == 200, current_refresh.json().get(
+                        "error_description"
+                    )
+                    first_tokens = current_refresh.json()
+                    assert payload(first_tokens["access_token"])["sid"] == claims["sid"]
+                    changes = [
+                        event
+                        for event in security_events()
+                        if event["data"]["security_revision"] > before_change
+                        and event["event_type"] == "user.sessions.revoked"
+                    ]
+                    assert len(changes) == 1
+                    assert changes[0]["subject"] == user_id
+                    assert changes[0]["data"]["reason"] == "password_changed"
+                    assert (
+                        changes[0]["data"]["tokens_issued_at_or_before"]
+                        >= payload(second_tokens["access_token"])["iat"]
+                    )
+                    if not checked:
+                        _, code = login(second, "renamed-analyst", current_password)
+                        second_tokens = exchange(code).json()
+
                 admin.request("POST", f"{realm}/users/{user_id}/logout")
                 assert refresh(first_tokens["refresh_token"]).status_code == 400
                 logout_all = security_events()[-1]
@@ -283,13 +315,13 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                 assert logout_all["data"]["reason"] == "logout_all"
                 assert logout_all["data"]["tokens_issued_at_or_before"] >= claims["iat"]
 
-                _, bad_code = login(second, "renamed-analyst", "Updated-Test!29" + password)
+                _, bad_code = login(second, "renamed-analyst", current_password)
                 assert exchange(bad_code, verifier="wrong" * 12).status_code == 400
 
                 logout_context = browser.new_context()
                 try:
                     logout_page, logout_code = login(
-                        logout_context, "renamed-analyst", "Updated-Test!29" + password
+                        logout_context, "renamed-analyst", current_password
                     )
                     logout_response = exchange(logout_code)
                     assert logout_response.status_code == 200
@@ -322,9 +354,7 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
 
                 admin_logout_context = browser.new_context()
                 try:
-                    _, code = login(
-                        admin_logout_context, "renamed-analyst", "Updated-Test!29" + password
-                    )
+                    _, code = login(admin_logout_context, "renamed-analyst", current_password)
                     admin_logout_tokens = exchange(code).json()
                     sid = payload(admin_logout_tokens["access_token"])["sid"]
                     session_path = f"{realm}/sessions/{sid}"
@@ -397,7 +427,7 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                             "client_id": CLIENT,
                             "grant_type": grant,
                             "username": "renamed-analyst",
-                            "password": "Updated-Test!29" + password,
+                            "password": current_password,
                         },
                     ).status_code in (400, 401)
                 # Client-bound token responses enforce origins; preflight has no client identity.
@@ -427,9 +457,58 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                 assert bad.headers.get("access-control-allow-origin") is None
                 # Credential/login/token/client operations must not fabricate profile updates.
                 assert len(profiles()) == 3
-                email_page, _ = login(
-                    profile_context, "renamed-analyst", "Updated-Test!29" + password
+                _, profile_code = login(profile_context, "renamed-analyst", current_password)
+                profile_tokens = exchange(profile_code).json()
+                reset_path = f"{realm}/users/{user_id}/reset-password"
+                reset_password = "Admin-Reset!29" + password
+                reset_body = {"type": "password", "value": reset_password, "temporary": False}
+                admin.request("PUT", reset_path, reset_body | {"value": ""}, expected=(400,))
+                assert security_events()[-1] == revoked
+                assert (
+                    runtime.sql("""
+                    ALTER TABLE dl_identity_outbox ADD CONSTRAINT dl_password_reject
+                    CHECK ((payload::jsonb -> 'data' ->> 'reason') <> 'admin_password_reset')
+                    NOT VALID;
+                    """).returncode
+                    == 0
                 )
+                other_context = browser.new_context()
+                try:
+                    try:
+                        failed_reset = admin.request("PUT", reset_path, reset_body, expected=(500,))
+                        assert failed_reset.json() == {"error": "identity_event_persistence_failed"}
+                        assert security_events()[-1] == revoked
+                        active = refresh(profile_tokens["refresh_token"])
+                        assert active.status_code == 200
+                        _, code = login(other_context, "renamed-analyst", current_password)
+                        other_tokens = exchange(code).json()
+                    finally:
+                        assert (
+                            runtime.sql(
+                                "ALTER TABLE dl_identity_outbox DROP CONSTRAINT dl_password_reject;"
+                            ).returncode
+                            == 0
+                        )
+                    admin.request("PUT", reset_path, reset_body)
+                    assert refresh(active.json()["refresh_token"]).status_code == 400
+                    assert refresh(other_tokens["refresh_token"]).status_code == 400
+                    assert admin.request("GET", f"{realm}/users/{user_id}/sessions").json() == []
+                    reset_event = security_events()[-1]
+                    assert reset_event["event_type"] == "user.sessions.revoked"
+                    assert reset_event["subject"] == user_id
+                    assert reset_event["data"]["reason"] == "admin_password_reset"
+                    assert (
+                        reset_event["data"]["security_revision"]
+                        == revoked["data"]["security_revision"] + 1
+                    )
+                    assert (
+                        reset_event["data"]["tokens_issued_at_or_before"]
+                        >= payload(other_tokens["access_token"])["iat"]
+                    )
+                finally:
+                    other_context.close()
+                email_page, profile_code = login(profile_context, "renamed-analyst", reset_password)
+                assert exchange(profile_code).status_code == 200
                 email_page.goto(issuer + "/account/")
                 email_page.locator("#email").fill("changed@example.invalid")
                 assert (
@@ -496,7 +575,7 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                 assert changed_roles["data"]["reason"] == "roles_changed"
                 assert (
                     changed_roles["data"]["security_revision"]
-                    == revoked["data"]["security_revision"] + 1
+                    == reset_event["data"]["security_revision"] + 1
                 )
                 admin.request(
                     "PUT", f"{realm}/clients/{web_id}", {"redirectUris": [frontend + "/drift"]}
