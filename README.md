@@ -6,32 +6,27 @@ Python is configuration/test tooling; there is no custom authentication API.
 
 ## Current progress
 
-**Current, 11 November 2026: 3.8.4.3.1 native profile mappings.**
-**Status: Blocked ? final runtime verification.** Identity branch:
-`fix/identity-profile-events`. Administrator/native profile snapshots, null
-clearing and transactional rollback protection are implemented in the disposable
-test image. The configuration CLI also has bounded administrator-token renewal,
-serialized rotation and an IPv4 transport for local Compose URLs; hosted URLs and
-agent authentication are unchanged.
+**11 November 2026 - 3.8.4.3.2 security mappings**
 
-Final unit gate: **149 passed, 22 runtime/PostgreSQL tests deselected, 0.50 seconds**.
-Fifteen new administration-client tests pass. Ruff lint, changed-file formatting,
-dependency and whitespace checks pass. Latest fresh full gate after Docker reset:
-**114 passed, 1 failed, 172.46 seconds**, stopping on realm cleanup after profile
-assertions passed. This is not a successful full gate or merge sign-off.
-Prior JVM samples found realm deletion/session cleanup spinning in Hibernate's
-SimpleTimestamper; a timestamp-only probe observed guest-clock rollback. Increasing
-cleanup timeouts and forcing IPv4 did not resolve that stall. Original cleanup
-limits remain; no cache/JIT/transaction assertion is bypassed. Disposable test
-containers are stopped and ignored reports retain the failed-run evidence.
+Implemented on `fix/identity-security-events`. Keycloak records session
+logout, direct role changes, account enable/disable and deletion in its
+transactional outbox. Security revisions are independent of profile revisions.
+The provider remains limited to the disposable test image.
+See [identity event sources](docs/identity-event-integration.md#security-event-sources).
 
-Next action is stable-clock local verification or a draft PR's Linux `tests` gate;
-do not merge or implement 3.8.4.3.2 security mappings until verification passes.
-3.8.4.3.3 password enforcement and RabbitMQ publishing/consumption remain later.
-The user authorized this fix branch's commit/push and a draft PR for Linux CI.
-No merge, production activation or cloud deployment is authorized.
-Parent plans are outside service Git repositories and their PRs. Older progress
-snapshots below are historical.
+The provider builds. All 149 unit tests passed. The two focused runtime tests
+passed before the extra admin-session rollback assertion was added. In the
+final full run, the browser test passed with that assertion. The full run
+stopped at **165 passed and one failure** after the outbox test timed out on
+realm teardown. Its event, rollback, concurrency and restart assertions
+finished before teardown. Five later tests did not run. This matches the prior
+local teardown symptom, with no JVM cause confirmed on this run. Required
+Linux PR CI is pending. Disposable test containers were removed.
+
+The next step after verified PR delivery is 3.8.4.3.3 password enforcement.
+
+Previous milestone: native profile mappings passed 171 Linux tests and merged
+in [PR #12](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/pull/12).
 
 **Broker ownership revision, 10 November 2026:** separate `datalens-messaging`
 repository owns RabbitMQ deployment/storage/topology/permissions. This repository

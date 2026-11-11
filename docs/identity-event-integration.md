@@ -1,6 +1,6 @@
 # Identity integration: plan 3.8.4
 
-Updated 11 November 2026. Current branch: `fix/identity-profile-events`.
+Updated 11 November 2026. Current branch: `fix/identity-security-events`.
 Implement one slice, verify it and stop before the next.
 
 **Broker ownership revision, 10 November 2026:** RabbitMQ deployment, persistent
@@ -21,13 +21,13 @@ earlier `identity-rabbitmq` planning name. This changes repository ownership onl
    Security allocation is verified with the mappings in 3.8.4.3. Do not substitute
    in-memory or after-commit-only sending for atomic durable intent.
 3. **3.8.4.3 Mappings/enforcement**, divided into these sequential slices:
-   - **3.8.4.3.1 Profile mappings (blocked: runtime verification):** canonical full snapshots for
+   - **3.8.4.3.1 Profile mappings (merged, Linux verified):** canonical full snapshots for
      administrator creation/updates and native Account Console profile edits.
      Verify stable subject, consecutive revisions, explicit null clearing and
      account/outbox rollback with honest HTTP failure on validation/storage errors.
      Existing self-registration handling is not acceptance-tested; onboarding
      remains administrator-created accounts with public registration disabled.
-   - **3.8.4.3.2 Security mappings (not started):** independent security revisions,
+   - **3.8.4.3.2 Security mappings (implemented, PR gate pending):** independent security revisions,
      session/user revocation, enable/disable, deletion and role changes, including
      administrative paths. Prove ordering, rollback and cutoff semantics.
    - **3.8.4.3.3 Password enforcement (not started):** invalidate other sessions
@@ -55,39 +55,60 @@ This expands an existing stage into reviewable slices, not another top-level pla
 3.8.4.1 delivery is accepted from user confirmation. The
 [3.8.4.2 proof](transactional-outbox-proof.md) demonstrates administrative creation/
 profile writes, rollback and concurrent profile counters in the disposable image.
-Security counters start at zero; complete security allocation/mappings are not
-implemented. Focused real gate passed; final full regression passed (156 tests in 435.03 seconds, 10 November 2026). No broker
-or production realm activation. Stop before 3.8.4.3. Verification below records
-the earlier contract-only stage, not final source-proof regression.
+Security counters start at zero. The transactional source proof passed 156 tests
+on 10 November 2026. The profile mapping then passed [171 Linux tests](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/actions/runs/42988281357)
+and merged in [PR #12](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/pull/12).
 
-## Current profile-slice verification
+## Security event sources
 
-**Current, 11 November 2026: 3.8.4.3.1 native profile mappings.**
-**Status: Blocked ? final runtime verification.** Identity branch:
-`fix/identity-profile-events`. Administrator/native profile snapshots, null
-clearing and transactional rollback protection are implemented in the disposable
-test image. The configuration CLI also has bounded administrator-token renewal,
-serialized rotation and an IPv4 transport for local Compose URLs; hosted URLs and
-agent authentication are unchanged.
+| Successful Keycloak action | Outbox event |
+|---|---|
+| OIDC logout or Account Console session removal with a user and session ID | `user.session.revoked`, reason `logout` |
+| Administrator removes one session by ID | `user.session.revoked`, reason `admin_session_logout` |
+| Administrator uses the per-user logout endpoint | `user.sessions.revoked`, reason `logout_all` |
+| Administrator adds or removes a user's direct realm or client role mapping | `user.sessions.revoked`, reason `roles_changed` |
+| Administrator changes the enabled state | `user.disabled` or `user.enabled`, alongside the existing profile snapshot |
+| Administrator deletes the user | `user.deleted` |
 
-Final unit gate: **149 passed, 22 runtime/PostgreSQL tests deselected, 0.50 seconds**.
-Fifteen new administration-client tests pass. Ruff lint, changed-file formatting,
-dependency and whitespace checks pass. Latest fresh full gate after Docker reset:
-**114 passed, 1 failed, 172.46 seconds**, stopping on realm cleanup after profile
-assertions passed. This is not a successful full gate or merge sign-off.
-Prior JVM samples found realm deletion/session cleanup spinning in Hibernate's
-SimpleTimestamper; a timestamp-only probe observed guest-clock rollback. Increasing
-cleanup timeouts and forcing IPv4 did not resolve that stall. Original cleanup
-limits remain; no cache/JIT/transaction assertion is bypassed. Disposable test
-containers are stopped and ignored reports retain the failed-run evidence.
+Keycloak's administrator session-delete event carries the session ID after the
+session is gone. A request filter captures its owner before removal. The
+listener writes on Keycloak's matching success event. The target is the session
+owner even when the administrator is a different user. An offline session with
+a distinct linked online session ID produces a revocation for each ID.
+Keycloak's enable-state details distinguish transitions from repeat writes.
+Security revisions and outbox rows share the Keycloak transaction. The existing
+per-subject row serializes revision allocation.
 
-Next action is stable-clock local verification or a draft PR's Linux `tests` gate;
-do not merge or implement 3.8.4.3.2 security mappings until verification passes.
-3.8.4.3.3 password enforcement and RabbitMQ publishing/consumption remain later.
-The user authorized this fix branch's commit/push and a draft PR for Linux CI.
-No merge, production activation or cloud deployment is authorized.
-Parent plans are outside service Git repositories and their PRs. Older progress
-snapshots below are historical.
+Cutoffs use the same clock as Keycloak token issuance, rounded down to Unix
+seconds. Direct role mapping events request rejection of older access tokens by
+the future agent consumer. Keycloak refresh sessions remain active on role
+changes. Group membership changes, edits to composite role definitions and
+realm-wide logout are outside these per-user mappings. Password changes and
+resets belong to 3.8.4.3.3. The provider remains in the disposable test image.
+
+Pinned sources: [user operations](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/resources/admin/UserResource.java),
+[admin session deletion](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/resources/admin/RealmAdminResource.java),
+[Account Console sessions](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/resources/account/SessionResource.java),
+[realm role mappings](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/resources/admin/RoleMapperResource.java)
+and [client role mappings](https://github.com/keycloak/keycloak/blob/26.8.1/services/src/main/java/org/keycloak/services/resources/admin/ClientRoleMappingsResource.java).
+
+The runtime suite exercises OIDC logout, administrative logout and role mapping
+through real Keycloak endpoints. PostgreSQL checks cover enable/disable,
+deletion, repeat or rejected requests, concurrent security revision allocation
+and rollback when the security event insert fails.
+
+## Security-slice verification
+
+The provider builds. All 149 unit tests passed. The two focused runtime tests
+passed before the extra admin-session rollback assertion was added. In the
+final full run, the browser test passed with that assertion. The full run
+stopped at **165 passed and one failure** after the outbox test timed out on
+realm teardown. Its event, rollback, concurrency and restart assertions
+finished before teardown. Five later tests did not run. This matches the prior
+local teardown symptom, with no JVM cause confirmed on this run. Required
+Linux PR CI is pending. Disposable test containers were removed.
+
+The next step after verified PR delivery is 3.8.4.3.3 password enforcement.
 
 ## Wire contract
 
@@ -112,9 +133,8 @@ issuer string does not authenticate the sender; transport must authorize it.
 | `user.enabled` | `security_revision`; never clears prior revocations |
 | `user.deleted` | `security_revision`, `tokens_issued_at_or_before`; no display PII |
 
-Profile/security revisions are independent positive signed-64-bit source counters,
-not timestamps or consumer order. Profile allocation uses the proven atomic
-PostgreSQL upsert; security allocation remains 3.8.4.3.2 work.
+Profile/security revisions are independent positive signed-64-bit source counters.
+Both counters use atomic PostgreSQL upserts.
 Retain each distinct session revocation even if a newer security event arrives
 first. Deletion tombstones dominate stale profiles; reenabling cannot resurrect
 old sessions. Event IDs remain stable on retry. Cutoffs are inclusive Unix seconds:
@@ -131,7 +151,7 @@ login records or image attributes belong in events. Render display data as text.
 Consumer receipt/state updates must commit together before acknowledgement in
 3.8.5. These contracts do not cancel bounded jobs or change agent HTTP auth.
 
-## Verification
+## Contract-stage verification (historical)
 
 **46 contract tests passed; 134 identity unit tests passed, 21 runtime/PostgreSQL
 tests deselected**, 0.52 seconds. Ruff lint, changed-file formatting, dependency

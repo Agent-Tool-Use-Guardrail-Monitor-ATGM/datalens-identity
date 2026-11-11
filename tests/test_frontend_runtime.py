@@ -65,17 +65,25 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
         realm_id = str(UUID(admin.request("GET", realm).json()["id"]))
         admin.request("PUT", realm, {"eventsListeners": ["identity-outbox-proof"]})
 
-        def profiles():
+        def outbox_events():
             rows = runtime.value(
                 f"SELECT payload FROM dl_identity_outbox WHERE realm_id = '{realm_id}';"
             )
-            events = [
+            return [
                 decode_event(row.encode(), expected_issuer=origin + "/realms/" + realm)
                 for row in rows.splitlines()
             ]
+
+        def profiles():
             return sorted(
-                (e for e in events if e["event_type"] in {"user.created", "user.profile.updated"}),
+                (e for e in outbox_events() if "profile_revision" in e["data"]),
                 key=lambda e: e["data"]["profile_revision"],
+            )
+
+        def security_events():
+            return sorted(
+                (e for e in outbox_events() if "security_revision" in e["data"]),
+                key=lambda e: e["data"]["security_revision"],
             )
 
         api_id = configure_api(admin, realm, frontend)
@@ -103,7 +111,9 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
         )
         user_id = admin.request("GET", realm + "/users?username=analyst&exact=true").json()[0]["id"]
         role = admin.request("GET", f"{realm}/clients/{api_id}/roles/admin").json()
-        admin.request("POST", f"{realm}/users/{user_id}/role-mappings/clients/{api_id}", [role])
+        role_path = f"{realm}/users/{user_id}/role-mappings/clients/{api_id}"
+        admin.request("POST", role_path, [role])
+        assert security_events()[0]["data"]["reason"] == "roles_changed"
         assert len(profiles()) == 1
         assert profiles()[0]["event_type"] == "user.created"
         assert profiles()[0]["data"]["profile_revision"] == 1
@@ -268,6 +278,10 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                 assert refresh(second_tokens["refresh_token"]).status_code == 400
                 admin.request("POST", f"{realm}/users/{user_id}/logout")
                 assert refresh(first_tokens["refresh_token"]).status_code == 400
+                logout_all = security_events()[-1]
+                assert logout_all["event_type"] == "user.sessions.revoked"
+                assert logout_all["data"]["reason"] == "logout_all"
+                assert logout_all["data"]["tokens_issued_at_or_before"] >= claims["iat"]
 
                 _, bad_code = login(second, "renamed-analyst", "Updated-Test!29" + password)
                 assert exchange(bad_code, verifier="wrong" * 12).status_code == 400
@@ -295,8 +309,72 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                     logout_page.wait_for_url(lambda url: url.startswith(frontend + "/?"))
                     assert parse_qs(urlparse(logout_page.url).query)["state"] == [logout_state]
                     assert refresh(logout_tokens["refresh_token"]).status_code == 400
+                    native = security_events()[-1]
+                    assert native["event_type"] == "user.session.revoked"
+                    assert native["subject"] == user_id
+                    assert native["data"]["reason"] == "logout"
+                    assert (
+                        native["data"]["session_id"]
+                        == payload(logout_tokens["access_token"])["sid"]
+                    )
                 finally:
                     logout_context.close()
+
+                admin_logout_context = browser.new_context()
+                try:
+                    _, code = login(
+                        admin_logout_context, "renamed-analyst", "Updated-Test!29" + password
+                    )
+                    admin_logout_tokens = exchange(code).json()
+                    sid = payload(admin_logout_tokens["access_token"])["sid"]
+                    session_path = f"{realm}/sessions/{sid}"
+                    assert (
+                        http.delete(
+                            origin + "/admin/realms/" + session_path,
+                            headers={
+                                "Authorization": "Bearer " + admin_logout_tokens["access_token"]
+                            },
+                        ).status_code
+                        == 403
+                    )
+                    assert security_events()[-1] == native
+                    assert (
+                        runtime.sql("""
+                        ALTER TABLE dl_identity_outbox ADD CONSTRAINT dl_logout_reject
+                        CHECK ((payload::jsonb -> 'data' ->> 'reason') <> 'admin_session_logout')
+                        NOT VALID;
+                        """).returncode
+                        == 0
+                    )
+                    try:
+                        failed_logout = admin.request("DELETE", session_path, expected=(500,))
+                        assert failed_logout.json() == {
+                            "error": "identity_event_persistence_failed"
+                        }
+                        assert security_events()[-1] == native
+                        still_active = refresh(admin_logout_tokens["refresh_token"])
+                        assert still_active.status_code == 200
+                    finally:
+                        assert (
+                            runtime.sql(
+                                "ALTER TABLE dl_identity_outbox DROP CONSTRAINT dl_logout_reject;"
+                            ).returncode
+                            == 0
+                        )
+                    admin.request("DELETE", session_path)
+                    assert refresh(still_active.json()["refresh_token"]).status_code == 400
+                    revoked = security_events()[-1]
+                    assert revoked["event_type"] == "user.session.revoked"
+                    assert revoked["subject"] == user_id
+                    assert revoked["data"] == {
+                        "security_revision": native["data"]["security_revision"] + 1,
+                        "session_id": sid,
+                        "reason": "admin_session_logout",
+                    }
+                    admin.request("DELETE", session_path, expected=(404,))
+                    assert security_events()[-1] == revoked
+                finally:
+                    admin_logout_context.close()
 
                 for changed in (
                     {"redirect_uri": frontend + "/evil"},
@@ -411,6 +489,15 @@ def test_public_pkce_roles_account_edits_password_sessions_and_legacy_preservati
                     "email": None,
                 }
                 assert len(profiles()) == 5
+                admin.request("DELETE", role_path, [role])
+                changed_roles = security_events()[-1]
+                assert changed_roles["event_type"] == "user.sessions.revoked"
+                assert changed_roles["subject"] == user_id
+                assert changed_roles["data"]["reason"] == "roles_changed"
+                assert (
+                    changed_roles["data"]["security_revision"]
+                    == revoked["data"]["security_revision"] + 1
+                )
                 admin.request(
                     "PUT", f"{realm}/clients/{web_id}", {"redirectUris": [frontend + "/drift"]}
                 )
