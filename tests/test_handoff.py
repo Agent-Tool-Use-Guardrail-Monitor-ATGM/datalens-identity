@@ -38,7 +38,8 @@ def test_fresh_setup_and_retained_storage_preserve_accounts_and_secret(tmp_path,
     assert model["name"] == PROJECT
     database = model["services"]["identity-postgres"]
     assert database["environment"]["POSTGRES_DB"] == "identity_test_db"
-    assert not database.get("ports")
+    # The publisher fixture needs host access. This separate handoff uses Docker networking.
+    database.pop("ports", None)
     database.pop("tmpfs")
     database["volumes"].append(
         {
