@@ -1,5 +1,10 @@
 # 3.8.4.2: transactional Keycloak outbox proof
 
+**Current extension:** 3.8.4.3.1 passed Linux acceptance (171 tests) and was
+delivered in PR #12. The original 3.8.4.2 proof below is historical; see the
+[latest Linux acceptance](#linux-acceptance-and-implementation-delivery) at the end.
+Production activation remains deferred.
+
 Branch: `fix/transactional-identity-outbox`. Scope is a disposable source proof,
 not a production identity-event rollout. The provider is packaged only by
 `docker/keycloak/Dockerfile.outbox-test`, selected by the existing runtime test
@@ -227,13 +232,13 @@ library patch, swallowed cleanup error or relaxed transaction assertion is used.
 
 Primary context: [upstream HHH-13664 discussion in Hibernate's issue archive](https://lists.jboss.org/archives/list/hibernate-issues%40lists.jboss.org/2023/3/?count=200&page=6).
 
-### Latest gate and stop condition
+### Local gate before Linux verification
 
 After the Docker reset, the fresh fail-fast full gate had **114 passes and one
 failure in 172.46 seconds**, at the native profile test's realm-deletion cleanup.
 All profile assertions passed, but cleanup still failed. The existing 15-second
-cleanup deadline is unchanged. Full regression is therefore **blocked**, not
-complete. Report: ignored `test-results/profile-events-full-after-reset.xml`.
+cleanup deadline is unchanged. Local full regression was therefore **blocked** at this checkpoint; the later
+Linux acceptance below completes source verification. Report: ignored `test-results/profile-events-full-after-reset.xml`.
 The final unit-only gate passed **149 tests, 22 deselected, in 0.50 seconds**;
 Ruff, changed-file formatting, dependency and whitespace checks passed.
 
@@ -244,3 +249,20 @@ CI `tests` job on a draft PR. Do not merge, claim production readiness or implem
 security mappings while this gate remains unresolved. The user subsequently
 authorized committing/pushing this branch and opening a draft PR for Linux CI,
 without merging. Parent planning updates are outside this repository and PR.
+
+### Linux acceptance and implementation delivery
+
+Required Linux [`tests` run 42988281357](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/actions/runs/42988281357)
+passed on implementation commit `81e9754`: **171 passed in 341.56 seconds**;
+whole job 7 minutes 54 seconds. This includes every browser/PostgreSQL test,
+forced real provider renewal, transaction rollback/concurrency, restart and realm
+cleanup. No tests were skipped and original cleanup deadlines were retained.
+The local timestamp stall is therefore recorded as a local runtime limitation,
+not a reason to bypass cleanup or change vendor caches/JIT behavior.
+
+[PR #12](https://github.com/Agent-Tool-Use-Guardrail-Monitor-ATGM/datalens-identity/pull/12)
+was subsequently merged as `3c69795` by the repository owner. Source slice
+3.8.4.3.1 is complete and delivered. These verification-record changes are a
+separate docs-only PR; no merge is performed by the agent. Production image/realm
+activation, security mappings, password enforcement and RabbitMQ delivery remain
+outside this slice. Stop before 3.8.4.3.2 until the next user instruction.
