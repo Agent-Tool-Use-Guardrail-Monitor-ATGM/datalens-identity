@@ -23,6 +23,7 @@ import org.keycloak.models.AbstractKeycloakTransaction;
 import org.keycloak.models.RealmModel;
 import org.keycloak.models.UserModel;
 import org.keycloak.models.UserSessionModel;
+import org.keycloak.models.jpa.entities.UserEntity;
 import org.keycloak.urls.UrlType;
 
 /** Identity event capture for the disposable Keycloak image. */
@@ -131,6 +132,16 @@ public class OutboxListener implements EventListenerProvider {
     }
 
     private void record(String realmId, String subject, String eventType, Map<String, String> securityData) {
+        record(realmId, subject, eventType, securityData, null);
+    }
+
+    void recordSnapshot(RealmModel realm, UserEntity user) {
+        record(realm.getId(), user.getId(), "user.profile.updated", null, user);
+        record(realm.getId(), user.getId(), user.isEnabled() ? "user.enabled" : "user.disabled", Map.of());
+    }
+
+    private void record(String realmId, String subject, String eventType,
+            Map<String, String> securityData, UserEntity snapshot) {
         try {
             RealmModel realm = session.realms().getRealm(realmId);
             EntityManager em = session.getProvider(JpaConnectionProvider.class).getEntityManager();
@@ -152,7 +163,14 @@ public class OutboxListener implements EventListenerProvider {
             Instant now = profile ? Instant.now().truncatedTo(ChronoUnit.MICROS)
                     : Instant.ofEpochMilli(Time.currentTimeMillis());
             if (profile) {
-                addProfile(data, session.users().getUserById(realm, subject));
+                if (snapshot == null) {
+                    UserModel user = session.users().getUserById(realm, subject);
+                    if (user == null) throw new IllegalStateException("Missing account snapshot");
+                    addProfile(data, user.getFirstName(), user.getLastName(), user.getUsername(), user.getEmail());
+                } else {
+                    addProfile(data, snapshot.getFirstName(), snapshot.getLastName(), snapshot.getUsername(),
+                            snapshot.getEmail());
+                }
             } else {
                 checkDisplay(securityData.get("session_id"), 255);
                 data.putAll(securityData);
@@ -185,16 +203,15 @@ public class OutboxListener implements EventListenerProvider {
         }
     }
 
-    private static void addProfile(Map<String, Object> data, UserModel user) {
-        if (user == null) throw new IllegalStateException("Missing account snapshot");
-        String name = ((user.getFirstName() == null ? "" : user.getFirstName()) + " "
-                + (user.getLastName() == null ? "" : user.getLastName())).trim();
+    private static void addProfile(Map<String, Object> data, String first, String last,
+            String username, String email) {
+        String name = ((first == null ? "" : first) + " " + (last == null ? "" : last)).trim();
         checkDisplay(name, 256);
-        checkDisplay(user.getUsername(), 256);
-        checkDisplay(user.getEmail(), 320);
+        checkDisplay(username, 256);
+        checkDisplay(email, 320);
         data.put("display_name", name.isEmpty() ? null : name);
-        data.put("username", user.getUsername());
-        data.put("email", user.getEmail());
+        data.put("username", username);
+        data.put("email", email);
     }
 
     private IllegalStateException failTransaction() {

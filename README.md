@@ -6,6 +6,15 @@ Python is configuration/test tooling; there is no custom authentication API.
 
 ## Current progress
 
+**12 November 2026 - 3.8.5.3b Existing-user backfill**
+
+`feat/identity-backfill` adds the admin endpoint for local Keycloak accounts.
+The runtime test passed profile and status snapshot delivery, concurrent
+account edits, authorization, outbox rollback and RabbitMQ redelivery. The
+150 identity unit tests passed. Required Linux PR CI is pending.
+
+[Backfill runbook and supported accounts](docs/identity-event-integration.md#existing-user-backfill).
+
 **11 November 2026 - 3.8.4.5 transport acceptance**
 
 Implemented on `test/identity-transport`. The disposable check sends real

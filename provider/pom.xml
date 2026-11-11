@@ -18,5 +18,9 @@
   <build><plugins>
     <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.14.0</version></plugin>
     <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId><version>3.4.2</version></plugin>
+    <plugin>
+      <groupId>io.smallrye</groupId><artifactId>jandex-maven-plugin</artifactId><version>3.6.0</version>
+      <executions><execution><goals><goal>jandex</goal></goals></execution></executions>
+    </plugin>
   </plugins></build>
 </project>

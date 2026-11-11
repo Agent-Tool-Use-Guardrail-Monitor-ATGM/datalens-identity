@@ -7,10 +7,12 @@ import org.keycloak.models.KeycloakSession;
 import org.keycloak.models.KeycloakSessionFactory;
 
 public class OutboxListenerFactory implements EventListenerProviderFactory {
+    static final String ID = "identity-outbox-proof";
+
     public EventListenerProvider create(KeycloakSession session) {
         return new OutboxListener(session);
     }
-    public String getId() { return "identity-outbox-proof"; }
+    public String getId() { return ID; }
     public void init(Config.Scope config) {}
     public void postInit(KeycloakSessionFactory factory) {}
     public void close() {}
