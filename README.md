@@ -6,6 +6,40 @@ Python is configuration/test tooling; there is no custom authentication API.
 
 ## Current progress
 
+**Current, 11 November 2026: 3.8.4.3.1 native profile mappings.**
+**Status: Blocked ? final runtime verification.** Identity branch:
+`fix/identity-profile-events`. Administrator/native profile snapshots, null
+clearing and transactional rollback protection are implemented in the disposable
+test image. The configuration CLI also has bounded administrator-token renewal,
+serialized rotation and an IPv4 transport for local Compose URLs; hosted URLs and
+agent authentication are unchanged.
+
+Final unit gate: **149 passed, 22 runtime/PostgreSQL tests deselected, 0.50 seconds**.
+Fifteen new administration-client tests pass. Ruff lint, changed-file formatting,
+dependency and whitespace checks pass. Latest fresh full gate after Docker reset:
+**114 passed, 1 failed, 172.46 seconds**, stopping on realm cleanup after profile
+assertions passed. This is not a successful full gate or merge sign-off.
+Prior JVM samples found realm deletion/session cleanup spinning in Hibernate's
+SimpleTimestamper; a timestamp-only probe observed guest-clock rollback. Increasing
+cleanup timeouts and forcing IPv4 did not resolve that stall. Original cleanup
+limits remain; no cache/JIT/transaction assertion is bypassed. Disposable test
+containers are stopped and ignored reports retain the failed-run evidence.
+
+Next action is stable-clock local verification or a draft PR's Linux `tests` gate;
+do not merge or implement 3.8.4.3.2 security mappings until verification passes.
+3.8.4.3.3 password enforcement and RabbitMQ publishing/consumption remain later.
+The user authorized this fix branch's commit/push and a draft PR for Linux CI.
+No merge, production activation or cloud deployment is authorized.
+Parent plans are outside service Git repositories and their PRs. Older progress
+snapshots below are historical.
+
+**Broker ownership revision, 10 November 2026:** separate `datalens-messaging`
+repository owns RabbitMQ deployment/storage/topology/permissions. This repository
+retains Keycloak source changes, outbox, schemas and publisher. Only a local
+messaging repository scaffold exists; no broker is provisioned. See the revised
+[integration sequence](docs/identity-event-integration.md). This is documentation
+only on `fix/broker-repository-boundary`; the verified source proof below is unchanged.
+
 **Current: 3.8.4.2 transactional source proof**, on `fix/transactional-identity-outbox`.
 [Proof, tables, rollback semantics and limits](docs/transactional-outbox-proof.md).
 Pinned Java/Keycloak provider added only to the disposable test image; production

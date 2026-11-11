@@ -22,14 +22,18 @@ import org.keycloak.urls.UrlType;
 
 /** Transaction proof only: not a complete production identity-change listener. */
 public class OutboxListener implements EventListenerProvider {
+    static final String FAILURE_ATTRIBUTE = "io.datalens.identity.outbox.failed";
     private static final ObjectMapper JSON = new ObjectMapper();
     private final KeycloakSession session;
 
     public OutboxListener(KeycloakSession session) { this.session = session; }
 
     public void onEvent(Event event) {
-        if (event.getError() == null && event.getType() == EventType.REGISTER) {
+        if (event.getError() != null) return;
+        if (event.getType() == EventType.REGISTER) {
             record(event.getRealmId(), event.getUserId(), "user.created");
+        } else if (event.getType() == EventType.UPDATE_PROFILE) {
+            record(event.getRealmId(), event.getUserId(), "user.profile.updated");
         }
     }
 
@@ -91,6 +95,7 @@ public class OutboxListener implements EventListenerProvider {
             em.persist(record);
             em.flush();
         } catch (Exception failure) {
+            session.setAttribute(FAILURE_ATTRIBUTE, Boolean.TRUE);
             // Listener errors are swallowed; prepare must fail before any main transaction commits.
             session.getTransactionManager().enlistPrepare(new AbstractKeycloakTransaction() {
                 protected void commitImpl() {

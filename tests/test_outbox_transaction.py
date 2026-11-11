@@ -47,6 +47,10 @@ def test_account_and_outbox_share_commit_rollback_and_revision_lock(runtime, mon
     admin = Admin(origin, admin_name, password)
     admin.client.timeout = httpx.Timeout(60)
     try:
+        # Exercise real provider renewal after authentication rejects the access token.
+        admin.client.headers["Authorization"] = "Bearer invalid-test-access-token"
+        assert admin.request("GET", "master").status_code == 200
+        assert admin.client.headers["Authorization"] != "Bearer invalid-test-access-token"
         create_realm(admin, realm)
         realm_id = str(UUID(admin.request("GET", realm).json()["id"]))
         admin.request("PUT", realm, {"eventsListeners": ["identity-outbox-proof"]})

@@ -7,6 +7,8 @@ import os
 import secrets
 import subprocess
 from pathlib import Path
+from threading import Lock
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -20,7 +22,15 @@ class SetupError(Exception):
 
 class Admin:
     def __init__(self, origin, username, password):
-        self.client = httpx.Client(base_url=origin, timeout=15, trust_env=False)
+        # Local Compose publishes IPv4 ports; preserve the canonical localhost issuer URL.
+        transport = (
+            httpx.HTTPTransport(local_address="0.0.0.0", trust_env=False)
+            if urlsplit(origin).hostname == "localhost"
+            else None
+        )
+        self.client = httpx.Client(
+            base_url=origin, timeout=15, trust_env=False, transport=transport
+        )
         response = self.client.post(
             "/realms/master/protocol/openid-connect/token",
             data={
@@ -33,15 +43,59 @@ class Admin:
         if response.status_code != 200:
             self.client.close()
             raise SetupError("Administrator authentication failed.")
-        self.client.headers["Authorization"] = "Bearer " + response.json()["access_token"]
+        try:
+            self._set_tokens(response)
+        except SetupError:
+            self.client.close()
+            raise
+        self._refresh_lock = Lock()
+
+    def _set_tokens(self, response):
+        try:
+            tokens = response.json()
+            access, refresh = tokens["access_token"], tokens["refresh_token"]
+            if any(
+                not isinstance(value, str) or not value or any(c.isspace() for c in value)
+                for value in (access, refresh)
+            ):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            raise SetupError("Administrator token response was invalid.") from None
+        self.client.headers["Authorization"] = "Bearer " + access
+        self._refresh_token = refresh
 
     def request(self, method, path, body=None, expected=(200, 201, 204)):
+        sent_token = self.client.headers["Authorization"]
         response = self.client.request(method, "/admin/realms/" + path, json=body)
+        if response.status_code == 401 and 401 not in expected:
+            # Only an authentication rejection is safe to replay, never a timeout/5xx.
+            with self._refresh_lock:
+                if self.client.headers["Authorization"] == sent_token:
+                    self._renew_access()
+            response = self.client.request(method, "/admin/realms/" + path, json=body)
         if response.status_code not in expected:
             raise SetupError(f"Identity administration failed (HTTP {response.status_code}).")
         return response
 
+    def _renew_access(self):
+        request = self.client.build_request(
+            "POST",
+            "/realms/master/protocol/openid-connect/token",
+            data={
+                "grant_type": "refresh_token",
+                "client_id": "admin-cli",
+                "refresh_token": self._refresh_token,
+            },
+        )
+        request.headers.pop("Authorization", None)
+        response = self.client.send(request)
+        if response.status_code != 200:
+            raise SetupError("Administrator session renewal failed; authenticate again.")
+        self._set_tokens(response)
+
     def close(self):
+        self._refresh_token = ""
+        self.client.headers.pop("Authorization", None)
         self.client.close()
 
 
