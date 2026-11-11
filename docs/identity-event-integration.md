@@ -199,3 +199,29 @@ database schema or cloud configuration changed. Stop before 3.8.4.2.
 
 Validator: [jsonschema 4.26.0](https://pypi.org/project/jsonschema/4.26.0/).
 Parent workspace plans are outside this service repository/PR.
+## Existing-user backfill
+
+On the pinned Keycloak 26.8.1 provider image, enable `identity-outbox-proof`
+for the target realm and start the normal publisher and consumer. With a realm
+administrator who can manage users, list accounts through Keycloak's paginated
+`GET /admin/realms/{realm}/users` endpoint. For each known local user ID, send
+`POST /admin/realms/{realm}/identity-backfill/users/{subject}` with no body.
+Run one pass during a stable account inventory or repeat the listing if accounts
+changed while paging. A `204` means both snapshots committed to the identity
+outbox. Wait for the consumer backlog and dead-letter queue to be reconciled
+before cutover.
+
+The endpoint takes a lock on the local Keycloak account and writes a full
+profile event and its current enabled/disabled status under the existing
+source revisions. It leaves account fields and sessions intact. A second
+successful request issues a newer snapshot. Transport retries reuse the
+original event IDs. Missing accounts, federated users and service accounts
+are outside this backfill. Accounts deleted before the listener was active
+and historical session revocations cannot be reconstructed from the current
+account inventory. Allow previously issued access tokens to expire before
+switching to bearer admission.
+
+The endpoint uses Keycloak's internal admin extension SPI and local JPA user
+model. Re-run the runtime test before upgrading Keycloak. The hosted image and
+rollout remain part of the deployment handoff.
+See the [Keycloak custom REST resource guidance](https://www.keycloak.org/docs/latest/upgrading/index.html#upgrading-your-custom-jax-rs-resources).

@@ -62,7 +62,20 @@ def test_account_and_outbox_share_commit_rollback_and_revision_lock(
         assert admin.client.headers["Authorization"] != "Bearer invalid-test-access-token"
         create_realm(admin, realm)
         realm_id = str(UUID(admin.request("GET", realm).json()["id"]))
+        admin.request(
+            "POST",
+            realm + "/users",
+            {"username": "existing-user", "firstName": "Existing", "enabled": False},
+        )
+        existing = admin.request("GET", realm + "/users?username=existing-user&exact=true").json()[
+            0
+        ]
+        existing_path = f"{realm}/users/{existing['id']}"
+        existing = admin.request("GET", existing_path).json()
+        snapshot_path = f"{realm}/identity-backfill/users/{existing['id']}"
+        admin.request("POST", snapshot_path, expected=(404,))
         admin.request("PUT", realm, {"eventsListeners": ["identity-outbox-proof"]})
+        admin.request("POST", f"{realm}/identity-backfill/users/{uuid4()}", expected=(404,))
 
         def events():
             rows = runtime.value(
@@ -161,6 +174,7 @@ def test_account_and_outbox_share_commit_rollback_and_revision_lock(
                 ).status_code
                 == 500
             )
+            admin.request("POST", snapshot_path, expected=(500,))
         finally:
             assert (
                 runtime.sql("""
@@ -237,13 +251,102 @@ def test_account_and_outbox_share_commit_rollback_and_revision_lock(
                 assert cutoff == int(datetime.fromisoformat(event["occurred_at"]).timestamp())
             if event["event_type"] == "user.sessions.revoked":
                 assert event["data"]["reason"] == "logout_all"
-        saved = {e["event_id"]: e for e in all_events}
+
+        admin.request("POST", f"{realm}/identity-backfill/users/{subject}", expected=(404,))
+        with httpx.Client(base_url=origin, timeout=10) as unauthenticated:
+            assert unauthenticated.post("/admin/realms/" + snapshot_path).status_code == 401
+            client_secret = secrets.token_urlsafe(32)
+            admin.request(
+                "POST",
+                f"{realm}/clients",
+                {
+                    "clientId": "backfill-denied",
+                    "secret": client_secret,
+                    "serviceAccountsEnabled": True,
+                },
+            )
+            token = unauthenticated.post(
+                f"/realms/{realm}/protocol/openid-connect/token",
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": "backfill-denied",
+                    "client_secret": client_secret,
+                },
+            )
+            assert token.status_code == 200
+            forbidden = unauthenticated.post(
+                "/admin/realms/" + snapshot_path,
+                headers={"Authorization": "Bearer " + token.json()["access_token"]},
+            )
+            assert forbidden.status_code == 403
+        assert all(e["subject"] != existing["id"] for e in events())
+        admin.request("POST", snapshot_path, expected=(204,))
+        assert admin.request("GET", existing_path).json() == existing
+        first_snapshot = [e for e in events() if e["subject"] == existing["id"]]
+        by_type = {e["event_type"]: e["data"] for e in first_snapshot}
+        assert len(first_snapshot) == 2
+        assert by_type["user.profile.updated"] == {
+            "profile_revision": 1,
+            "display_name": "Existing",
+            "username": "existing-user",
+            "email": None,
+        }
+        assert by_type["user.disabled"]["security_revision"] == 1
+        assert by_type["user.disabled"]["tokens_issued_at_or_before"] > 0
+
+        assert (
+            runtime.sql("""
+            ALTER TABLE dl_identity_outbox ADD CONSTRAINT dl_snapshot_reject
+            CHECK ((payload::jsonb ->> 'event_type') <> 'user.disabled') NOT VALID;
+            """).returncode
+            == 0
+        )
+        try:
+            admin.request("POST", snapshot_path, expected=(500,))
+            assert {e["event_id"] for e in events()} == {
+                e["event_id"] for e in [*all_events, *first_snapshot]
+            }
+        finally:
+            assert (
+                runtime.sql(
+                    "ALTER TABLE dl_identity_outbox DROP CONSTRAINT dl_snapshot_reject;"
+                ).returncode
+                == 0
+            )
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            requests = [
+                pool.submit(admin.request, "POST", snapshot_path, expected=(204,)),
+                pool.submit(admin.request, "POST", snapshot_path, expected=(204,)),
+                pool.submit(
+                    admin.request, "PUT", existing_path, {"firstName": "Current", "enabled": True}
+                ),
+            ]
+            assert [request.result().status_code for request in requests] == [204] * 3
+
+        saved = {e["event_id"]: e for e in events()}
+        existing_events = [e for e in saved.values() if e["subject"] == existing["id"]]
+        profiles = sorted(
+            (e["data"] for e in existing_events if e["event_type"] == "user.profile.updated"),
+            key=lambda data: data["profile_revision"],
+        )
+        assert [data["profile_revision"] for data in profiles] == [1, 2, 3, 4]
+        assert profiles[-1]["display_name"] == "Current"
+        statuses = sorted(
+            (e for e in existing_events if "security_revision" in e["data"]),
+            key=lambda event: event["data"]["security_revision"],
+        )
+        assert [e["data"]["security_revision"] for e in statuses] == [1, 2, 3, 4]
+        assert statuses[-1]["event_type"] == "user.enabled"
         assert {e["event_id"]: e for e in events()} == saved
         assert runtime.command("restart", "--no-deps", "identity-keycloak").returncode == 0
         assert runtime.command("up", "-d", "--wait", "--wait-timeout", "180").returncode == 0
         assert {e["event_id"]: e for e in events()} == saved
         assert all(len(json.dumps(e).encode()) <= 16384 for e in saved.values())
-        verify_transport(publisher_database[0], broker_project, issuer, realm_id, saved)
+        replay_id = next(
+            e["event_id"] for e in first_snapshot if e["event_type"] == "user.disabled"
+        )
+        verify_transport(publisher_database[0], broker_project, issuer, realm_id, saved, replay_id)
     finally:
         admin.close()
         cleanup = Admin(origin, admin_name, password)
@@ -253,7 +356,7 @@ def test_account_and_outbox_share_commit_rollback_and_revision_lock(
             cleanup.close()
 
 
-def verify_transport(connection, broker_project, issuer, realm_id, expected):
+def verify_transport(connection, broker_project, issuer, realm_id, expected, replay_id):
     compose, _ = broker_project
     broker = RabbitPublisher(broker_parameters(amqp_url(broker_project, "identity-publisher")))
     compose("stop", "rabbitmq")
@@ -299,12 +402,8 @@ def verify_transport(connection, broker_project, issuer, realm_id, expected):
         broker_parameters(amqp_url(broker_project, "agent-identity-consumer"))
     ) as consumer:
         channel = consumer.channel()
-        _, properties, _ = receive(channel, time.monotonic() + 15)
-        assert properties.message_id in expected
-        abandoned_id = properties.message_id
-        channel.close()
-        channel = consumer.channel()
         received = {}
+        abandoned = False
         poison_rejected = False
         deadline = time.monotonic() + 15
         while len(received) < len(expected) or not poison_rejected:
@@ -321,7 +420,12 @@ def verify_transport(connection, broker_project, issuer, realm_id, expected):
             assert properties.delivery_mode == 2
             assert delivery.routing_key == event["event_type"]
             assert event["event_id"] not in received
-            if event["event_id"] == abandoned_id:
+            if event["event_id"] == replay_id:
+                if not abandoned:
+                    abandoned = True
+                    channel.close()
+                    channel = consumer.channel()
+                    continue
                 assert delivery.redelivered
             received[event["event_id"]] = event
             channel.basic_ack(delivery.delivery_tag)
